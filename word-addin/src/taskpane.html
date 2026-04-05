@@ -73,10 +73,25 @@
     }
     button.primary:hover { background: #106ebe; }
     button.primary:active { background: #005a9e; }
-    button.primary:disabled {
+    button.primary:disabled, button.secondary:disabled {
       background: #ccc;
       cursor: not-allowed;
     }
+    button.secondary {
+      width: 100%;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #0078d4;
+      background: #fff;
+      border: 2px solid #0078d4;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 16px;
+      transition: all 0.15s;
+    }
+    button.secondary:hover { background: #f0f6ff; }
+    button.secondary:active { background: #deecf9; }
     #status {
       margin-top: 12px;
       font-size: 12px;
@@ -115,6 +130,7 @@
     </div>
   </div>
 
+  <button class="secondary" id="btnSetup">書式設定</button>
   <button class="primary" id="btnConvert">変換を実行</button>
   <div id="status"></div>
 
@@ -123,7 +139,7 @@
     &mdash; MIT License
   </div>
 
-  <script src="converter.js?v=20260405b"></script>
-  <script src="taskpane.js?v=20260405b"></script>
+  <script src="converter.js?v=20260405c"></script>
+  <script src="taskpane.js?v=20260405c"></script>
 </body>
 </html>

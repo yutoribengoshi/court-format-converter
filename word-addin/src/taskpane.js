@@ -4,9 +4,33 @@
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Word) {
+    document.getElementById('btnSetup').addEventListener('click', onSetup);
     document.getElementById('btnConvert').addEventListener('click', onConvert);
   }
 });
+
+async function onSetup() {
+  const btn = document.getElementById('btnSetup');
+  const status = document.getElementById('status');
+
+  btn.disabled = true;
+  btn.textContent = '設定中...';
+  status.textContent = '';
+  status.className = '';
+
+  try {
+    await setupFormat();
+    status.textContent = '書式設定完了: ページ設定・フォント（MS 明朝 12pt）';
+    status.className = 'success';
+  } catch (error) {
+    console.error('書式設定エラー:', error);
+    status.textContent = `エラー: ${error.message}`;
+    status.className = 'error';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '書式設定';
+  }
+}
 
 async function onConvert() {
   const btn = document.getElementById('btnConvert');

@@ -206,6 +206,35 @@ class HeadingCounter {
 }
 
 // ============================================================
+// 書式設定（新規文書セットアップ）
+// ============================================================
+
+async function setupFormat() {
+  await Word.run(async (context) => {
+    // ページ設定
+    const sections = context.document.sections;
+    sections.load('body');
+    await context.sync();
+
+    for (const section of sections.items) {
+      const ps = section.pageSetup;
+      ps.paperSize = Word.PaperSize.a4;
+      ps.topMargin = PAGE.topMargin;
+      ps.bottomMargin = PAGE.bottomMargin;
+      ps.leftMargin = PAGE.leftMargin;
+      ps.rightMargin = PAGE.rightMargin;
+    }
+
+    // デフォルトフォント設定
+    const body = context.document.body;
+    body.font.name = FONT.western;
+    body.font.size = FONT.size;
+
+    await context.sync();
+  });
+}
+
+// ============================================================
 // メイン変換処理
 // ============================================================
 
