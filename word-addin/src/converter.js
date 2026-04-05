@@ -24,15 +24,28 @@ const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PKG_NS = 'http://schemas.microsoft.com/office/2006/xmlPackage';
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
 
+// twips直接指定。半角括弧(L3,L5,L7)は幅が狭い。
+// [title_start_twips, number_hang_twips]
+const _F = 242; // full-width char
+const _H = 121; // half-width char
 const HEADING_LEVELS = {
-  1: [3, 3], 2: [4, 2], 3: [6, 3], 4: [6, 2],
-  5: [8, 3], 6: [8, 2], 7: [10, 3],
+  1: [3*_F, 3*_F],
+  2: [2*_F+2*_F, 2*_F],
+  3: [2*_F+2*_F+3*_H+_F, 3*_H+_F],
+  4: [2*_F+2*_F+2*_F, 2*_F],
+  5: [2*_F+2*_F+2*_F+3*_H+_F, 3*_H+_F],
+  6: [2*_F+2*_F+2*_F+2*_F, 2*_F],
+  7: [2*_F+2*_F+2*_F+2*_F+3*_H+_F, 3*_H+_F],
 };
 
-const BODY_INDENT = {
-  0: [0, 1], 1: [2, 1], 2: [3, 1], 3: [5, 1],
-  4: [5, 1], 5: [7, 1], 6: [7, 1], 7: [9, 1],
-};
+// [left_twips, firstLine_twips]
+// left + firstLine = title_start（1行目が見出しタイトルと揃う）
+// left = title_start - 1全角（2行目は1字左）
+const BODY_INDENT = {};
+for (const [lv, [ts]] of Object.entries(HEADING_LEVELS)) {
+  BODY_INDENT[lv] = [ts - _F, _F];
+}
+BODY_INDENT[0] = [0, _F];
 
 const TITLE_PATTERN = /(準備書面|訴状|答弁書|意見書|報告書|申立書|陳述書|上申書|申請書|請求書|通知書|催告書|告訴状|告発状|嘆願書|抗告理由書|控訴理由書|上告理由書)/;
 const LIST_PATTERN = /^[０-９\d]+．/;
@@ -449,24 +462,25 @@ function setParagraphIndent(paragraph, { leftTwips = 0, hangingTwips = 0, firstL
 function setHeadingIndent(paragraph, level) {
   const [titleStart, numberHang] = HEADING_LEVELS[level];
   setParagraphIndent(paragraph, {
-    leftTwips: titleStart * CHAR_WIDTH,
-    hangingTwips: numberHang * CHAR_WIDTH,
+    leftTwips: titleStart,
+    hangingTwips: numberHang,
   });
 }
 
 function setBodyIndent(paragraph, currentHeadingLevel) {
-  const [left, firstLine] = BODY_INDENT[currentHeadingLevel] || [1, 0];
+  const [left, firstLine] = BODY_INDENT[currentHeadingLevel] || [0, _F];
   setParagraphIndent(paragraph, {
-    leftTwips: left * CHAR_WIDTH,
-    firstLineTwips: firstLine * CHAR_WIDTH,
+    leftTwips: left,
+    firstLineTwips: firstLine,
   });
 }
 
 function setListIndent(paragraph, currentHeadingLevel, markerLength) {
   const [bodyLeft] = BODY_INDENT[currentHeadingLevel] || [0, 0];
+  const markerTwips = markerLength * _F;
   setParagraphIndent(paragraph, {
-    leftTwips: (bodyLeft + markerLength) * CHAR_WIDTH,
-    hangingTwips: markerLength * CHAR_WIDTH,
+    leftTwips: bodyLeft + markerTwips,
+    hangingTwips: markerTwips,
   });
 }
 

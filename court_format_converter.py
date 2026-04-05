@@ -36,34 +36,28 @@ from docx.oxml import parse_xml
 # ============================================================
 
 
-# 見出しレベルごとの設定: (title_start, number_hang)
-# title_start: タイトル開始位置（文字数） = 本文の左インデントと一致
-# number_hang: 見出し番号のぶら下げ幅（文字数）
-# 見出し: left=title_start, hanging=number_hang → 番号が左に飛び出す
-# 本文:   left=title_start → タイトルと頭が揃う
+# 見出しレベルごとの設定: (title_start_twips, number_hang_twips)
+# twips直接指定。半角括弧の番号（L3,L5,L7）は幅が狭い。
+# 全角1文字=242, 半角1文字=121
+_F = 242  # full-width
+_H = 121  # half-width
 HEADING_LEVELS = {
-    1: (3, 3),   # 第１　→ left=3, hang=3 → 番号は0から開始
-    2: (4, 2),   # １　→ left=4, hang=2 → 番号は2から開始
-    3: (6, 3),   # (1)　→ left=6, hang=3 → 番号は3から開始
-    4: (6, 2),   # ア　→ left=6, hang=2 → 番号は4から開始
-    5: (8, 3),   # (ｱ)　→ left=8, hang=3 → 番号は5から開始
-    6: (8, 2),   # ａ　→ left=8, hang=2 → 番号は6から開始
-    7: (10, 3),  # (a)　→ left=10, hang=3 → 番号は7から開始
+    1: (3*_F,         3*_F),          # 第１　→ 全角3文字
+    2: (2*_F+2*_F,    2*_F),          # １　→ L1の下、全角2文字
+    3: (2*_F+2*_F+3*_H+_F, 3*_H+_F), # (1)　→ L2の下、半角3+全角1=605
+    4: (2*_F+2*_F+2*_F,    2*_F),     # ア　→ L3と同レベル幅、全角2文字
+    5: (2*_F+2*_F+2*_F+3*_H+_F, 3*_H+_F), # (ｱ)　→ L4の下
+    6: (2*_F+2*_F+2*_F+2*_F,    2*_F),     # ａ　→ L5と同レベル幅
+    7: (2*_F+2*_F+2*_F+2*_F+3*_H+_F, 3*_H+_F), # (a)　→ L6の下
 }
 
-# 本文インデント: (左インデント文字数, 首行字下げ文字数)
-# 首行(1行目) = 左 + 首行 = タイトル開始位置 → 「走」と「被」が揃う
-# 2行目以降 = 左 = タイトル開始位置 - 1字
-BODY_INDENT = {
-    0: (0, 1),   # 見出しなし直後
-    1: (2, 1),   # 第１直下 → 1行目: 2+1=3=「走」位置、2行目: 2
-    2: (3, 1),   # １直下 → 1行目: 3+1=4=「走」位置、2行目: 3
-    3: (5, 1),   # (1)直下 → 1行目: 5+1=6、2行目: 5
-    4: (5, 1),   # ア直下 → 1行目: 5+1=6、2行目: 5
-    5: (7, 1),   # (ｱ)直下 → 1行目: 7+1=8、2行目: 7
-    6: (7, 1),   # ａ直下 → 1行目: 7+1=8、2行目: 7
-    7: (9, 1),   # (a)直下 → 1行目: 9+1=10、2行目: 9
-}
+# 本文インデント: (左twips, 首行twips)
+# 左 + 首行 = HEADING_LEVELS[n]のtitle_start → 1行目が見出しタイトルと揃う
+# 左 = title_start - 1全角文字 → 2行目以降は1字左
+BODY_INDENT = {}
+for _lv, (_ts, _nh) in HEADING_LEVELS.items():
+    BODY_INDENT[_lv] = (_ts - _F, _F)  # 左=タイトル位置-1字, 首行=1字
+BODY_INDENT[0] = (0, _F)  # 見出しなし
 
 
 # ============================================================
@@ -341,8 +335,8 @@ def set_heading_indent(para, level):
     """
     title_start, number_hang = HEADING_LEVELS[level]
     _set_indent_twips(para,
-                      left_twips=title_start * CHAR_WIDTH,
-                      hanging_twips=number_hang * CHAR_WIDTH)
+                      left_twips=title_start,
+                      hanging_twips=number_hang)
 
 
 def set_body_indent(para, current_heading_level):
@@ -350,10 +344,10 @@ def set_body_indent(para, current_heading_level):
     2行目以降 = 見出しタイトル位置に揃う。
     1行目 = さらに1字右（首行字下げ）。
     """
-    left, fl = BODY_INDENT.get(current_heading_level, (1, 0))
+    left, fl = BODY_INDENT.get(current_heading_level, (0, _F))
     _set_indent_twips(para,
-                      left_twips=left * CHAR_WIDTH,
-                      first_line_twips=fl * CHAR_WIDTH)
+                      left_twips=left,
+                      first_line_twips=fl)
 
 
 # ============================================================
@@ -629,12 +623,11 @@ def convert(input_path, output_path=None):
                     current_text = para.runs[0].text if para.runs else stripped
                     list_match = re.match(r'^[０-９\d]+．', current_text)
                     if list_match:
-                        num_width = len(list_match.group())  # 番号部分の文字数
+                        num_width_twips = len(list_match.group()) * _F  # 全角文字数 * 全角幅
                         body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
-                        # 左インデント = 本文位置 + 番号幅、ぶら下げ = 番号幅
-                        total_left = (body_left + num_width) * CHAR_WIDTH
-                        hang = num_width * CHAR_WIDTH
-                        _set_indent_twips(para, left_twips=total_left, hanging_twips=hang)
+                        _set_indent_twips(para,
+                                          left_twips=body_left + num_width_twips,
+                                          hanging_twips=num_width_twips)
                     else:
                         set_body_indent(para, current_heading_level)
                     if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
