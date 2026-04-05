@@ -403,14 +403,8 @@ def add_page_number(doc):
 # ============================================================
 
 def format_tables(doc):
-    """全テーブルの半角→全角変換＋フォントを統一。"""
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    for run in para.runs:
-                        convert_run_to_zenkaku(run)
-                        set_run_font(run, size=10)
+    """テーブルは元の書式を維持する（レイアウト崩れ防止）。"""
+    pass
 
 
 # ============================================================
