@@ -25,7 +25,7 @@ import sys
 import re
 import os
 from docx import Document
-from docx.shared import Pt, Mm, Twips
+from docx.shared import Pt, Mm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn, nsdecls
 from docx.oxml import parse_xml
@@ -36,31 +36,44 @@ from docx.oxml import parse_xml
 # ============================================================
 
 
-# 見出しレベルごとの設定: (title_start_twips, number_hang_twips)
-# twips直接指定。半角括弧の番号（L3,L5,L7）は幅が狭い。
-# 全角1文字=242, 半角1文字=121
-_F = 242  # full-width
-_H = 121  # half-width
-_NUM_FULL = 2 * _F          # 全角番号幅: ２文字（「１　」「ア　」等）
-_NUM_HALF = 3 * _H + _F     # 半角括弧番号幅: 605（「(1)　」等）
-# 番号開始位置（文字数）: L1=0, L2=2, L3=3, L4=4, L5=5, L6=6, L7=7
+# 1全角文字 = 245 twips (12pt MS明朝基準)
+CHAR_TWIPS = 245
+
+# 見出しレベルごとの設定: (left_chars, 番号説明)
+# 全角文字単位の整数。半角は使わない。
 HEADING_LEVELS = {
-    1: (0*_F + 3*_F,     3*_F),       # 第１　→ 番号0字目、幅3全角
-    2: (2*_F + _NUM_FULL, _NUM_FULL),  # １　→ 番号2字目、幅2全角
-    3: (3*_F + _NUM_HALF, _NUM_HALF),  # (1)　→ 番号3字目、幅2.5
-    4: (4*_F + _NUM_FULL, _NUM_FULL),  # ア　→ 番号4字目、幅2全角
-    5: (5*_F + _NUM_HALF, _NUM_HALF),  # (ｱ)　→ 番号5字目、幅2.5
-    6: (6*_F + _NUM_FULL, _NUM_FULL),  # ａ　→ 番号6字目、幅2全角
-    7: (7*_F + _NUM_HALF, _NUM_HALF),  # (a)　→ 番号7字目、幅2.5
+    1: (0, "第１"),    # 第１、第２ …
+    2: (2, "１"),      # １、２ …
+    3: (3, "(1)"),     # (1)、(2) …
+    4: (4, "ア"),      # ア、イ …
+    5: (5, "(ｱ)"),     # (ｱ)、(ｲ) …
+    6: (6, "ａ"),      # ａ、ｂ …
+    7: (7, "(a)"),     # (a)、(b) …
 }
 
-# 本文インデント: (左twips, 首行twips)
-# 左 + 首行 = HEADING_LEVELS[n]のtitle_start → 1行目が見出しタイトルと揃う
-# 左 = title_start - 1全角文字 → 2行目以降は1字左
-BODY_INDENT = {}
-for _lv, (_ts, _nh) in HEADING_LEVELS.items():
-    BODY_INDENT[_lv] = (_ts - _F, _F)  # 左=タイトル位置-1字, 首行=1字
-BODY_INDENT[0] = (0, _F)  # 見出しなし
+# 本文インデント: (left_chars, first_line_chars)
+# 対応する見出しレベルと同じ左位置 + 首行1字下げ
+BODY_INDENT = {
+    0: (0, 1),   # 見出しなし直後 → 首行1字のみ
+    1: (2, 1),   # 第１直下 → 左2字 + 首行1字
+    2: (2, 1),   # １直下 → 左2字 + 首行1字
+    3: (3, 1),   # (1)直下 → 左3字 + 首行1字
+    4: (4, 1),   # ア直下 → 左4字 + 首行1字
+    5: (5, 1),   # (ｱ)直下 → 左5字 + 首行1字
+    6: (6, 1),   # ａ直下 → 左6字 + 首行1字
+    7: (7, 1),   # (a)直下 → 左7字 + 首行1字
+}
+
+# 見出しレベルごとのぶら下げ幅（番号+スペース分、全角文字単位）
+_HEADING_HANGING = {
+    1: 0,    # 第１ はぶら下げなし
+    2: 1,    # １　 → 1字
+    3: 3,    # （１） → 3字
+    4: 1,    # ア　 → 1字
+    5: 3,    # （ｱ） → 3字
+    6: 1,    # ａ　 → 1字
+    7: 3,    # （a） → 3字
+}
 
 
 # ============================================================
@@ -128,11 +141,11 @@ def convert_run_to_zenkaku(run):
 
 HEADING_PATTERNS = [
     (1, re.compile(r'^[\s　]*第[１２３４５６７８９０\d]+[\s　]')),
-    (3, re.compile(r'^[\s　]*[\(（][１２３４５６７８９０\d]+[\)）][\s　]')),
-    (3, re.compile(r'^[\s　]*[⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇][\s　]')),  # 括弧付き数字（(1)の表記揺れ）
-    # ①②③は意図的に使うケースがあるため見出しとして検出しない
-    (5, re.compile(r'^[\s　]*[\(（][ｱ-ﾝア-ン]+[\)）][\s　]')),
-    (7, re.compile(r'^[\s　]*[\(（][a-zａ-ｚ]+[\)）][\s　]')),
+    # スペースなしで直接テキストが続くケースにも対応
+    (3, re.compile(r'^[\s　]*[\(（][１２３４５６７８９０\d]+[\)）][\s　]?')),
+    (3, re.compile(r'^[\s　]*[⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇][\s　]?')),  # 括弧付き数字（(1)の表記揺れ）
+    (5, re.compile(r'^[\s　]*[\(（][ｱ-ﾝア-ン]+[\)）][\s　]?')),
+    (7, re.compile(r'^[\s　]*[\(（][a-zａ-ｚ]+[\)）][\s　]?')),
     (2, re.compile(r'^[\s　]*[１２３４５６７８９０\d]+[\s　]')),
     (4, re.compile(r'^[\s　]*[ア-ン][　\s]')),
     (6, re.compile(r'^[\s　]*[ａ-ｚ][　\s]')),
@@ -304,53 +317,69 @@ def set_paragraph_font(para, size=12):
 # インデント設定
 # ============================================================
 
-def _clear_indent(para):
-    """段落の既存インデント設定をクリア。"""
+def set_indent(para, left_chars=0, first_line_chars=0, hanging_chars=0):
+    """段落にインデントを設定（全角文字単位の整数）。
+    hanging_chars: ぶら下げインデント（1行目を左に出す）。firstLineと排他。"""
     pPr = para._element.get_or_add_pPr()
+
+    # 既存のindを削除
     existing_ind = pPr.find(qn('w:ind'))
     if existing_ind is not None:
         pPr.remove(existing_ind)
 
-
-def _set_indent_twips(para, left_twips=0, hanging_twips=0, first_line_twips=0):
-    """段落のインデントをtwips絶対値で設定。グリッドに依存しない。"""
-    _clear_indent(para)
-    if left_twips == 0 and hanging_twips == 0 and first_line_twips == 0:
+    if left_chars == 0 and first_line_chars == 0 and hanging_chars == 0:
         return
 
     ind = parse_xml(f'<w:ind {nsdecls("w")}/>')
-    if left_twips > 0:
-        ind.set(qn('w:left'), str(left_twips))
-    if hanging_twips > 0:
-        ind.set(qn('w:hanging'), str(hanging_twips))
-    if first_line_twips > 0:
-        ind.set(qn('w:firstLine'), str(first_line_twips))
-    para._element.get_or_add_pPr().append(ind)
 
+    if left_chars > 0:
+        ind.set(qn('w:leftChars'), str(left_chars * 100))
+        ind.set(qn('w:left'), str(left_chars * CHAR_TWIPS))
+    if hanging_chars > 0:
+        ind.set(qn('w:hangingChars'), str(hanging_chars * 100))
+        ind.set(qn('w:hanging'), str(hanging_chars * CHAR_TWIPS))
+    elif first_line_chars > 0:
+        ind.set(qn('w:firstLineChars'), str(first_line_chars * 100))
+        ind.set(qn('w:firstLine'), str(first_line_chars * CHAR_TWIPS))
 
-# 12pt MS明朝 + グリッド補正: 全角1文字 ≈ 242twips
-CHAR_WIDTH = 242
+    pPr.append(ind)
+
 
 def set_heading_indent(para, level):
-    """見出し段落のインデント設定。
-    左インデント=タイトル開始位置、ぶら下げ=番号幅。
-    番号が左に飛び出し、タイトルは左インデント位置から始まる。
-    """
-    title_start, number_hang = HEADING_LEVELS[level]
-    _set_indent_twips(para,
-                      left_twips=title_start,
-                      hanging_twips=number_hang)
+    """見���し段落のインデント設定。
+    短い小タイトル: 首行1字下げ（左インデント0）
+    本文兼用（長い）: ぶら下げインデント（2行目以降が番号位置に揃う）"""
+    left_chars = HEADING_LEVELS[level][0]
+
+    # 番号部分を除いた本文の長さで判定
+    text = para.text.strip()
+    body = re.sub(
+        r'^[\s　]*(第[１-９０-９\d]+|[１-９０-９\d]+|[\(（][１-９０-９\d]+[\)）]|'
+        r'[ア-ン]|[\(（][ｱ-ﾝ]+[\)）]|[ａ-ｚ]|[\(（][a-z]+[\)）])[\s　]*',
+        '', text)
+
+    if len(body) > 20:
+        # 本文兼用 → ぶら下げインデント
+        hanging = _HEADING_HANGING.get(level, 1)
+        if level == 1:
+            set_indent(para, left_chars=left_chars)
+        else:
+            set_indent(para, left_chars=left_chars, hanging_chars=hanging)
+    else:
+        # 短い��タイトル → 左インデント0、首行1字下げ
+        if level == 1:
+            set_indent(para, left_chars=0)
+        else:
+            set_indent(para, left_chars=0, first_line_chars=1)
 
 
 def set_body_indent(para, current_heading_level):
-    """本文段落のインデント設定。
-    2行目以降 = 見出しタイトル位置に揃う。
-    1行目 = さらに1字右（首行字下げ）。
-    """
-    left, fl = BODY_INDENT.get(current_heading_level, (0, _F))
-    _set_indent_twips(para,
-                      left_twips=left,
-                      first_line_twips=fl)
+    """本文段落のインデント設定（直前の見出し��ベルに基づく）。"""
+    if current_heading_level in BODY_INDENT:
+        left, fl = BODY_INDENT[current_heading_level]
+    else:
+        left, fl = 0, 1
+    set_indent(para, left_chars=left, first_line_chars=fl)
 
 
 # ============================================================
@@ -459,7 +488,7 @@ def format_tables(doc):
 
                 for para in cell.paragraphs:
                     # セル内段落のインデントをリセット
-                    _clear_indent(para)
+                    set_indent(para)
                     # フォント10pt
                     set_paragraph_font(para, size=10)
 
@@ -608,7 +637,7 @@ def convert(input_path, output_path=None):
             else:
                 if SKIP_PATTERNS.match(text):
                     para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    _clear_indent(para)
+                    set_indent(para)
                 else:
                     # 元の手動インデント（先頭の全角スペース）を除去
                     raw = para.text
@@ -629,17 +658,16 @@ def convert(input_path, output_path=None):
                     # 記号付き: ・, -, －, ※, ①②③等
                     bullet_match = re.match(r'^[・－\-※①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]', current_text)
                     if list_match:
-                        marker_twips = len(list_match.group()) * _F
+                        marker_chars = len(list_match.group())
                         body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
-                        _set_indent_twips(para,
-                                          left_twips=body_left + marker_twips,
-                                          hanging_twips=marker_twips)
+                        set_indent(para,
+                                   left_chars=body_left + marker_chars,
+                                   hanging_chars=marker_chars)
                     elif bullet_match:
-                        marker_twips = _F  # 記号1文字分
                         body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
-                        _set_indent_twips(para,
-                                          left_twips=body_left + marker_twips,
-                                          hanging_twips=marker_twips)
+                        set_indent(para,
+                                   left_chars=body_left + 1,
+                                   hanging_chars=1)
                     else:
                         set_body_indent(para, current_heading_level)
                     if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
