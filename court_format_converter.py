@@ -591,6 +591,8 @@ def convert(input_path, output_path=None):
                     # 元の手動インデント（先頭の全角スペース）を除去
                     raw = para.text
                     stripped = raw.lstrip('\u3000 \t')
+                    # 箇条書き番号の後の全角スペースを除去（「１．　」→「１．」）
+                    stripped = re.sub(r'^([０-９\d]+．)[\u3000\s]+', r'\1', stripped)
                     if stripped != raw and para.runs:
                         for i, run in enumerate(para.runs):
                             if i == 0:
