@@ -211,7 +211,7 @@ class HeadingCounter {
 
 async function setupFormat() {
   await Word.run(async (context) => {
-    // ページ設定
+    // ページ設定のみ（フォントは「変換を実行」で処理）
     const sections = context.document.sections;
     sections.load('body');
     await context.sync();
@@ -223,15 +223,6 @@ async function setupFormat() {
       ps.bottomMargin = PAGE.bottomMargin;
       ps.leftMargin = PAGE.leftMargin;
       ps.rightMargin = PAGE.rightMargin;
-    }
-
-    // Normalスタイルのデフォルトフォントを設定
-    // 既存のテキスト（テーブル等）は変更せず、新規入力テキストに適用
-    const normalStyle = context.document.getStyles().getByNameOrNullObject('Normal');
-    await context.sync();
-    if (!normalStyle.isNullObject) {
-      normalStyle.font.name = FONT.western;
-      normalStyle.font.size = FONT.size;
     }
 
     await context.sync();
