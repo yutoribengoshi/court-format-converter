@@ -563,6 +563,16 @@ def convert(input_path, output_path=None):
             continue
 
         if in_header_section:
+            # 冒頭セクションでも先頭全角スペースは除去
+            raw = para.text
+            stripped_raw = raw.lstrip('\u3000 \t')
+            if stripped_raw != raw and para.runs:
+                for ri, run in enumerate(para.runs):
+                    if ri == 0:
+                        run.text = stripped_raw
+                    else:
+                        run.text = ''
+
             level = detect_heading_level(text)
             if level is not None:
                 in_header_section = False
