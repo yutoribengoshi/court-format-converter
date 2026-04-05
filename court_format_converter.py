@@ -345,11 +345,25 @@ def set_indent(para, left_chars=0, first_line_chars=0, hanging_chars=0):
     pPr.append(ind)
 
 
+def _set_outline_level(para, level):
+    """段落にアウトラインレベルを設定（目次生成用）。
+    見た目は変えずに、Wordの目次挿入機能で認識される。"""
+    pPr = para._element.get_or_add_pPr()
+    existing = pPr.find(qn('w:outlineLvl'))
+    if existing is not None:
+        pPr.remove(existing)
+    # outlineLvl: 0=Level1, 1=Level2, ... 8=本文
+    olvl = parse_xml(f'<w:outlineLvl {nsdecls("w")} w:val="{level - 1}"/>')
+    pPr.append(olvl)
+
+
 def set_heading_indent(para, level):
-    """見���し段落のインデント設定。
+    """見出し段落のインデント＋アウトラインレベル設定。
     短い小タイトル: 首行1字下げ（左インデント0）
-    本文兼用（長い）: ぶら下げインデント（2行目以降が番号位置に揃う）"""
+    本文兼用（長い）: ぶら下げインデント（2行目以降が番号位置に揃う）
+    アウトラインレベルにより、Wordの目次挿入で自動認識される。"""
     left_chars = HEADING_LEVELS[level][0]
+    _set_outline_level(para, level)
 
     # 番号部分を除いた本文の長さで判定
     text = para.text.strip()
@@ -366,7 +380,7 @@ def set_heading_indent(para, level):
         else:
             set_indent(para, left_chars=left_chars, hanging_chars=hanging)
     else:
-        # 短い��タイトル → 左インデント0、首行1字下げ
+        # 短い小タイトル → 左インデント0、首行1字下げ
         if level == 1:
             set_indent(para, left_chars=0)
         else:
@@ -374,7 +388,7 @@ def set_heading_indent(para, level):
 
 
 def set_body_indent(para, current_heading_level):
-    """本文段落のインデント設定（直前の見出し��ベルに基づく）。"""
+    """本文段落のインデント設定（直前の見出しレベルに基づく）。"""
     if current_heading_level in BODY_INDENT:
         left, fl = BODY_INDENT[current_heading_level]
     else:
@@ -558,6 +572,18 @@ def _remap_level(raw_level, offset):
     return max(1, min(adjusted, 7))
 
 
+# 岡口マクロが設定するスタイル名。これらが検出されたらインデント処理をスキップ。
+OKAGUCHI_STYLES = re.compile(r'^(ランク[１-９1-9]|本文[１-９1-9]|標準\(太郎文書スタイル\))')
+
+
+def _has_okaguchi_styles(doc):
+    """文書に岡口マクロのスタイルが使われているか判定。"""
+    for para in doc.paragraphs:
+        if para.style and OKAGUCHI_STYLES.match(para.style.name):
+            return True
+    return False
+
+
 def convert(input_path, output_path=None):
     """docxファイルを裁判所書式に変換。"""
 
@@ -567,111 +593,121 @@ def convert(input_path, output_path=None):
 
     doc = Document(input_path)
 
-    # Pass 1: レベルオフセット算出
-    level_offset = _detect_level_offset(doc)
+    # 岡口マクロのスタイルが検出されたらインデント処理をスキップ
+    skip_indent = _has_okaguchi_styles(doc)
+    if skip_indent:
+        print("注意: 岡口マクロのスタイルが検出されました。インデント処理をスキップします。")
 
     setup_page(doc)
     setup_default_style(doc)
 
-    # Pass 2: 変換適用（再付番あり）
-    current_heading_level = 0
-    in_header_section = True
-    counter = HeadingCounter()
+    if skip_indent:
+        # 岡口マクロ済み: 半角→全角変換とフォント統一のみ実行
+        for para in doc.paragraphs:
+            for run in para.runs:
+                convert_run_to_zenkaku(run)
+            set_paragraph_font(para, size=12)
+    else:
+        # Pass 1: レベルオフセット算出
+        level_offset = _detect_level_offset(doc)
 
-    for para in doc.paragraphs:
-        for run in para.runs:
-            convert_run_to_zenkaku(run)
+        # Pass 2: 変換適用（再付番あり）
+        current_heading_level = 0
+        in_header_section = True
+        counter = HeadingCounter()
 
-        text = para.text.strip()
-        set_paragraph_font(para, size=12)
+        for para in doc.paragraphs:
+            for run in para.runs:
+                convert_run_to_zenkaku(run)
 
-        if not text:
-            continue
+            text = para.text.strip()
+            set_paragraph_font(para, size=12)
 
-        if in_header_section:
-            # 冒頭セクションでも先頭全角スペースは除去
-            raw = para.text
-            stripped_raw = raw.lstrip('\u3000 \t')
-            if stripped_raw != raw and para.runs:
-                for ri, run in enumerate(para.runs):
-                    if ri == 0:
-                        run.text = stripped_raw
-                    else:
-                        run.text = ''
-
-            level = detect_heading_level(text)
-            if level is not None:
-                in_header_section = False
-            elif is_header_section(text):
-                # タイトル行を検出して16pt太字に
-                if TITLE_PATTERN.search(text):
-                    set_paragraph_font(para, size=16)
-                    for run in para.runs:
-                        run.font.bold = True
-                continue
-            else:
+            if not text:
                 continue
 
-        if not in_header_section:
-            level = detect_heading_level(text)
+            if in_header_section:
+                # 冒頭セクションでも先頭全角スペースは除去
+                raw = para.text
+                stripped_raw = raw.lstrip('\u3000 \t')
+                if stripped_raw != raw and para.runs:
+                    for ri, run in enumerate(para.runs):
+                        if ri == 0:
+                            run.text = stripped_raw
+                        else:
+                            run.text = ''
 
-            if level is not None:
-                adjusted = _remap_level(level, level_offset)
-                current_heading_level = adjusted
-
-                # 再付番: 元の番号を剥がして裁判所書式の番号に置換
-                body_text = strip_heading_number(para.text)
-                count = counter.increment(adjusted)
-                new_number = generate_heading_number(adjusted, count)
-                new_text = new_number + body_text
-
-                # 段落テキストを置換（最初のrunに全テキスト、残りを空に）
-                for i, run in enumerate(para.runs):
-                    if i == 0:
-                        run.text = new_text
-                    else:
-                        run.text = ''
-
-                set_heading_indent(para, adjusted)
-                para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            else:
-                if SKIP_PATTERNS.match(text):
-                    para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    set_indent(para)
+                level = detect_heading_level(text)
+                if level is not None:
+                    in_header_section = False
+                elif is_header_section(text):
+                    # タイトル行を検出して16pt太字に
+                    if TITLE_PATTERN.search(text):
+                        set_paragraph_font(para, size=16)
+                        for run in para.runs:
+                            run.font.bold = True
+                    continue
                 else:
-                    # 元の手動インデント（先頭の全角スペース）を除去
-                    raw = para.text
-                    stripped = raw.lstrip('\u3000 \t')
-                    # 箇条書き番号の後の全角スペースを除去（「１．　」→「１．」）
-                    stripped = re.sub(r'^([０-９\d]+．)[\u3000\s]+', r'\1', stripped)
-                    if stripped != raw and para.runs:
-                        for i, run in enumerate(para.runs):
-                            if i == 0:
-                                run.text = stripped
-                            else:
-                                run.text = ''
+                    continue
 
-                    # 箇条書きはぶら下げインデントで記号後に揃える
-                    current_text = para.runs[0].text if para.runs else stripped
-                    # 番号付き: １．, ２．等（全角）
-                    list_match = re.match(r'^[０-９\d]+．', current_text)
-                    # 記号付き: ・, -, －, ※, ①②③等
-                    bullet_match = re.match(r'^[・－\-※①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]', current_text)
-                    if list_match:
-                        marker_chars = len(list_match.group())
-                        body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
-                        set_indent(para,
-                                   left_chars=body_left + marker_chars,
-                                   hanging_chars=marker_chars)
-                    elif bullet_match:
-                        body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
-                        set_indent(para,
-                                   left_chars=body_left + 1,
-                                   hanging_chars=1)
+            if not in_header_section:
+                level = detect_heading_level(text)
+
+                if level is not None:
+                    adjusted = _remap_level(level, level_offset)
+                    current_heading_level = adjusted
+
+                    # 再付番: 元の番号を剥がして裁判所書式の番号に置換
+                    body_text = strip_heading_number(para.text)
+                    count = counter.increment(adjusted)
+                    new_number = generate_heading_number(adjusted, count)
+                    new_text = new_number + body_text
+
+                    # 段落テキストを置換（最初のrunに全テキスト、残りを空に）
+                    for i, run in enumerate(para.runs):
+                        if i == 0:
+                            run.text = new_text
+                        else:
+                            run.text = ''
+
+                    set_heading_indent(para, adjusted)
+                    para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                else:
+                    if SKIP_PATTERNS.match(text):
+                        para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        set_indent(para)
                     else:
-                        set_body_indent(para, current_heading_level)
-                    if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
-                        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        # 元の手動インデント（先頭の全角スペース）を除去
+                        raw = para.text
+                        stripped = raw.lstrip('\u3000 \t')
+                        # 箇条書き番号の後の全角スペースを除去
+                        stripped = re.sub(r'^([０-９\d]+．)[\u3000\s]+', r'\1', stripped)
+                        if stripped != raw and para.runs:
+                            for i, run in enumerate(para.runs):
+                                if i == 0:
+                                    run.text = stripped
+                                else:
+                                    run.text = ''
+
+                        # 箇条書きはぶら下げインデントで記号後に揃える
+                        current_text = para.runs[0].text if para.runs else stripped
+                        list_match = re.match(r'^[０-９\d]+．', current_text)
+                        bullet_match = re.match(r'^[・－\-※①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]', current_text)
+                        if list_match:
+                            marker_chars = len(list_match.group())
+                            body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
+                            set_indent(para,
+                                       left_chars=body_left + marker_chars,
+                                       hanging_chars=marker_chars)
+                        elif bullet_match:
+                            body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
+                            set_indent(para,
+                                       left_chars=body_left + 1,
+                                       hanging_chars=1)
+                        else:
+                            set_body_indent(para, current_heading_level)
+                        if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
+                            para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     format_tables(doc)
     add_page_number(doc)
