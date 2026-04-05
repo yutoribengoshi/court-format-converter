@@ -35,32 +35,34 @@ from docx.oxml import parse_xml
 # 定数
 # ============================================================
 
-# 1全角文字 = 245 twips (12pt MS明朝基準)
-CHAR_TWIPS = 245
 
-# 見出しレベルごとの設定: (left_chars, 番号説明)
+# 見出しレベルごとの設定: (title_start, number_hang)
+# title_start: タイトル開始位置（文字数） = 本文の左インデントと一致
+# number_hang: 見出し番号のぶら下げ幅（文字数）
+# 見出し: left=title_start, hanging=number_hang → 番号が左に飛び出す
+# 本文:   left=title_start → タイトルと頭が揃う
 HEADING_LEVELS = {
-    1: (0, "第１"),    # 第１、第２ …
-    2: (2, "１"),      # １、２ …
-    3: (3, "(1)"),     # (1)、(2) …
-    4: (4, "ア"),      # ア、イ …
-    5: (5, "(ｱ)"),     # (ｱ)、(ｲ) …
-    6: (6, "ａ"),      # ａ、ｂ …
-    7: (7, "(a)"),     # (a)、(b) …
+    1: (3, 3),   # 第１　→ left=3, hang=3 → 番号は0から開始
+    2: (4, 2),   # １　→ left=4, hang=2 → 番号は2から開始
+    3: (6, 3),   # (1)　→ left=6, hang=3 → 番号は3から開始
+    4: (6, 2),   # ア　→ left=6, hang=2 → 番号は4から開始
+    5: (8, 3),   # (ｱ)　→ left=8, hang=3 → 番号は5から開始
+    6: (8, 2),   # ａ　→ left=8, hang=2 → 番号は6から開始
+    7: (10, 3),  # (a)　→ left=10, hang=3 → 番号は7から開始
 }
 
-# 本文インデント: (左インデント, 首行字下げ)
-# 原則: 左 + 首行 = 見出しの左インデント + 番号幅（タイトル開始位置と揃える）
-# 見出し番号幅: 第１→3字, １→2字, (1)→3字, ア→2字, (ｱ)→3字, ａ→2字, (a)→3字
+# 本文インデント: (左インデント文字数, 首行字下げ文字数)
+# 左 = タイトル開始位置（2行目以降が見出しタイトルと揃う）
+# 首行 = +1字（1行目だけ1字右にずれる）
 BODY_INDENT = {
-    0: (0, 1),   # 見出しなし直後 → 首行1字のみ
-    1: (2, 1),   # 第１直下 → 0+3=3 → (2,1)=3
-    2: (3, 1),   # １直下 → 2+2=4 → (3,1)=4
-    3: (5, 1),   # (1)直下 → 3+3=6 → (5,1)=6
-    4: (5, 1),   # ア直下 → 4+2=6 → (5,1)=6
-    5: (7, 1),   # (ｱ)直下 → 5+3=8 → (7,1)=8
-    6: (7, 1),   # ａ直下 → 6+2=8 → (7,1)=8
-    7: (9, 1),   # (a)直下 → 7+3=10 → (9,1)=10
+    0: (1, 0),   # 見出しなし直後
+    1: (3, 1),   # 第１直下 → 2行目は「走」と揃う、1行目は1字右
+    2: (4, 1),   # １直下
+    3: (6, 1),   # (1)直下
+    4: (6, 1),   # ア直下
+    5: (8, 1),   # (ｱ)直下
+    6: (8, 1),   # ａ直下
+    7: (10, 1),  # (a)直下
 }
 
 
@@ -295,42 +297,53 @@ def set_paragraph_font(para, size=12):
 # インデント設定
 # ============================================================
 
-def set_indent(para, left_chars=0, first_line_chars=0):
-    """段落にインデントを設定（文字単位）。"""
+def _clear_indent(para):
+    """段落の既存インデント設定をクリア。"""
     pPr = para._element.get_or_add_pPr()
-
     existing_ind = pPr.find(qn('w:ind'))
     if existing_ind is not None:
         pPr.remove(existing_ind)
 
-    if left_chars == 0 and first_line_chars == 0:
+
+def _set_indent_twips(para, left_twips=0, hanging_twips=0, first_line_twips=0):
+    """段落のインデントをtwips絶対値で設定。グリッドに依存しない。"""
+    _clear_indent(para)
+    if left_twips == 0 and hanging_twips == 0 and first_line_twips == 0:
         return
 
     ind = parse_xml(f'<w:ind {nsdecls("w")}/>')
+    if left_twips > 0:
+        ind.set(qn('w:left'), str(left_twips))
+    if hanging_twips > 0:
+        ind.set(qn('w:hanging'), str(hanging_twips))
+    if first_line_twips > 0:
+        ind.set(qn('w:firstLine'), str(first_line_twips))
+    para._element.get_or_add_pPr().append(ind)
 
-    if left_chars > 0:
-        ind.set(qn('w:leftChars'), str(left_chars * 100))
-        ind.set(qn('w:left'), str(left_chars * CHAR_TWIPS))
-    if first_line_chars > 0:
-        ind.set(qn('w:firstLineChars'), str(first_line_chars * 100))
-        ind.set(qn('w:firstLine'), str(first_line_chars * CHAR_TWIPS))
 
-    pPr.append(ind)
-
+# 12pt MS明朝 + グリッド補正: 全角1文字 ≈ 242twips
+CHAR_WIDTH = 242
 
 def set_heading_indent(para, level):
-    """見出し段落のインデント設定。"""
-    left_chars = HEADING_LEVELS[level][0]
-    set_indent(para, left_chars=left_chars)
+    """見出し段落のインデント設定。
+    左インデント=タイトル開始位置、ぶら下げ=番号幅。
+    番号が左に飛び出し、タイトルは左インデント位置から始まる。
+    """
+    title_start, number_hang = HEADING_LEVELS[level]
+    _set_indent_twips(para,
+                      left_twips=title_start * CHAR_WIDTH,
+                      hanging_twips=number_hang * CHAR_WIDTH)
 
 
 def set_body_indent(para, current_heading_level):
-    """本文段落のインデント設定（直前の見出しレベルに基づく）。"""
-    if current_heading_level in BODY_INDENT:
-        left, fl = BODY_INDENT[current_heading_level]
-    else:
-        left, fl = 0, 1
-    set_indent(para, left_chars=left, first_line_chars=fl)
+    """本文段落のインデント設定。
+    2行目以降 = 見出しタイトル位置に揃う。
+    1行目 = さらに1字右（首行字下げ）。
+    """
+    left, fl = BODY_INDENT.get(current_heading_level, (1, 0))
+    _set_indent_twips(para,
+                      left_twips=left * CHAR_WIDTH,
+                      first_line_twips=fl * CHAR_WIDTH)
 
 
 # ============================================================
@@ -405,8 +418,40 @@ def add_page_number(doc):
 # ============================================================
 
 def format_tables(doc):
-    """テーブルは元の書式を維持する（レイアウト崩れ防止）。"""
-    pass
+    """テーブルのフォントを10ptに縮小、セル内インデントをリセット、列幅を自動調整。"""
+    for table in doc.tables:
+        # 列幅自動調整
+        tbl = table._tbl
+        tblPr = tbl.find(qn('w:tblPr'))
+        if tblPr is not None:
+            existing = tblPr.find(qn('w:tblLayout'))
+            if existing is not None:
+                tblPr.remove(existing)
+            layout = parse_xml(f'<w:tblLayout {nsdecls("w")} w:type="autofit"/>')
+            tblPr.append(layout)
+
+        for row in table.rows:
+            for cell in row.cells:
+                # セル内余白を最小化
+                tcPr = cell._tc.get_or_add_tcPr()
+                existing_mar = tcPr.find(qn('w:tcMar'))
+                if existing_mar is not None:
+                    tcPr.remove(existing_mar)
+                tcMar = parse_xml(
+                    f'<w:tcMar {nsdecls("w")}>'
+                    f'<w:top w:w="0" w:type="dxa"/>'
+                    f'<w:left w:w="28" w:type="dxa"/>'
+                    f'<w:bottom w:w="0" w:type="dxa"/>'
+                    f'<w:right w:w="28" w:type="dxa"/>'
+                    f'</w:tcMar>'
+                )
+                tcPr.append(tcMar)
+
+                for para in cell.paragraphs:
+                    # セル内段落のインデントをリセット
+                    _clear_indent(para)
+                    # フォント10pt
+                    set_paragraph_font(para, size=10)
 
 
 # ============================================================
@@ -538,8 +583,18 @@ def convert(input_path, output_path=None):
             else:
                 if SKIP_PATTERNS.match(text):
                     para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    set_indent(para)
+                    _clear_indent(para)
                 else:
+                    # 元の手動インデント（先頭の全角スペース）を除去
+                    raw = para.text
+                    stripped = raw.lstrip('\u3000 \t')
+                    if stripped != raw and para.runs:
+                        for i, run in enumerate(para.runs):
+                            if i == 0:
+                                run.text = stripped
+                            else:
+                                run.text = ''
+
                     set_body_indent(para, current_heading_level)
                     if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
                         para.alignment = WD_ALIGN_PARAGRAPH.LEFT
