@@ -133,7 +133,12 @@ function detectHeadingLevel(text) {
   if (!stripped) return null;
   if (SKIP_PATTERN.test(stripped)) return null;
   for (const { level, re } of HEADING_PATTERNS) {
-    if (re.test(stripped)) return level;
+    if (re.test(stripped)) {
+      // 番号を剥いだ後にテキストが残るか確認
+      const body = stripped.replace(HEADING_STRIP_RE, '').trim();
+      if (body) return level;
+      return null; // 番号だけの段落は見出しではない
+    }
   }
   return null;
 }

@@ -149,7 +149,9 @@ HEADER_PATTERNS = [
 
 
 def detect_heading_level(text):
-    """段落テキストから見出しレベルを判定。見出しでなければ None を返す。"""
+    """段落テキストから見出しレベルを判定。見出しでなければ None を返す。
+    番号の後に見出しテキストがない場合（数字だけの段落等）は見出しと見なさない。
+    """
     stripped = text.strip().replace('\u3000', '　')
 
     if not stripped:
@@ -160,7 +162,11 @@ def detect_heading_level(text):
 
     for level, pattern in HEADING_PATTERNS:
         if pattern.match(stripped):
-            return level
+            # 番号を剥いだ後にテキストが残るか確認
+            body = HEADING_STRIP_RE.sub('', stripped, count=1).strip()
+            if body:
+                return level
+            return None  # 番号だけの段落は見出しではない
 
     return None
 
