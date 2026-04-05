@@ -346,6 +346,46 @@ def setup_default_style(doc):
 # メイン変換処理
 # ============================================================
 
+def _detect_level_offset(doc):
+    """文書内の見出しレベルをスキャンし、最上位レベルへのオフセットを算出。
+
+    例: 文書が「１」(L2)始まりなら offset=1 → L2をL1にシフト。
+    「第１」(L1)始まりなら offset=0。
+    """
+    in_header = True
+    found_levels = []
+
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+        if in_header:
+            level = detect_heading_level(text)
+            if level is not None:
+                in_header = False
+                found_levels.append(level)
+            elif is_header_section(text):
+                continue
+            else:
+                continue
+        else:
+            level = detect_heading_level(text)
+            if level is not None:
+                found_levels.append(level)
+
+    if not found_levels:
+        return 0
+
+    min_level = min(found_levels)
+    return min_level - 1  # L1始まりなら0、L2始まりなら1、L3始まりなら2
+
+
+def _remap_level(raw_level, offset):
+    """検出されたレベルをオフセット分シフトして正規化。"""
+    adjusted = raw_level - offset
+    return max(1, min(adjusted, 7))
+
+
 def convert(input_path, output_path=None):
     """docxファイルを裁判所書式に変換。"""
 
@@ -355,9 +395,13 @@ def convert(input_path, output_path=None):
 
     doc = Document(input_path)
 
+    # Pass 1: レベルオフセット算出
+    level_offset = _detect_level_offset(doc)
+
     setup_page(doc)
     setup_default_style(doc)
 
+    # Pass 2: 変換適用
     current_heading_level = 0
     in_header_section = True
 
@@ -384,8 +428,9 @@ def convert(input_path, output_path=None):
             level = detect_heading_level(text)
 
             if level is not None:
-                current_heading_level = level
-                set_heading_indent(para, level)
+                adjusted = _remap_level(level, level_offset)
+                current_heading_level = adjusted
+                set_heading_indent(para, adjusted)
                 para.alignment = WD_ALIGN_PARAGRAPH.LEFT
             else:
                 if SKIP_PATTERNS.match(text):

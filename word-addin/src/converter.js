@@ -149,6 +149,11 @@ function isHeaderSection(text) {
 // メイン変換処理
 // ============================================================
 
+function remapLevel(rawLevel, offset) {
+  const adjusted = rawLevel - offset;
+  return Math.max(1, Math.min(adjusted, 7));
+}
+
 async function convertDocument(options) {
   const {
     page: doPage = true,
@@ -181,6 +186,35 @@ async function convertDocument(options) {
     paragraphs.load('text, font, alignment, leftIndent, firstLineIndent');
     await context.sync();
 
+    // Pass 1: レベルオフセット算出
+    let levelOffset = 0;
+    if (doIndent) {
+      let inHdr = true;
+      const foundLevels = [];
+      for (const para of paragraphs.items) {
+        const t = para.text.trim();
+        if (!t) continue;
+        if (inHdr) {
+          const lv = detectHeadingLevel(t);
+          if (lv !== null) {
+            inHdr = false;
+            foundLevels.push(lv);
+          } else if (isHeaderSection(t)) {
+            continue;
+          } else {
+            continue;
+          }
+        } else {
+          const lv = detectHeadingLevel(t);
+          if (lv !== null) foundLevels.push(lv);
+        }
+      }
+      if (foundLevels.length > 0) {
+        levelOffset = Math.min(...foundLevels) - 1;
+      }
+    }
+
+    // Pass 2: 変換適用
     let currentHeadingLevel = 0;
     let inHeaderSection = true;
     let firstHeadingFound = false;
@@ -192,10 +226,6 @@ async function convertDocument(options) {
       if (doFont) {
         para.font.name = FONT.western;
         para.font.size = FONT.size;
-        // eastAsiaFont は Word JS API で直接設定できないため
-        // OOXML操作が必要だが、font.name に日本語フォント名を
-        // 設定すると日本語部分に適用される
-        // 実用上は Times New Roman + サイズ統一で十分
       }
 
       // 半角→全角変換
@@ -216,13 +246,14 @@ async function convertDocument(options) {
           if (level !== null) {
             inHeaderSection = false;
             firstHeadingFound = true;
-            currentHeadingLevel = level;
-            para.leftIndent = HEADING_INDENT[level] * FONT.size;
+            const adjusted = remapLevel(level, levelOffset);
+            currentHeadingLevel = adjusted;
+            para.leftIndent = HEADING_INDENT[adjusted] * FONT.size;
             para.firstLineIndent = 0;
             para.alignment = Word.Alignment.left;
             continue;
           } else if (isHeaderSection(text)) {
-            continue; // 冒頭セクションはそのまま
+            continue;
           } else {
             continue;
           }
@@ -231,8 +262,9 @@ async function convertDocument(options) {
         // 見出し or 本文
         const level = detectHeadingLevel(text);
         if (level !== null) {
-          currentHeadingLevel = level;
-          para.leftIndent = HEADING_INDENT[level] * FONT.size;
+          const adjusted = remapLevel(level, levelOffset);
+          currentHeadingLevel = adjusted;
+          para.leftIndent = HEADING_INDENT[adjusted] * FONT.size;
           para.firstLineIndent = 0;
           para.alignment = Word.Alignment.left;
         } else if (SKIP_PATTERN.test(text)) {
