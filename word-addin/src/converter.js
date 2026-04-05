@@ -305,20 +305,8 @@ async function convertDocument(options) {
 
     await context.sync();
 
-    // テーブル: 10ptフォント
-    try {
-      const tables = context.document.body.tables;
-      tables.load('*');
-      await context.sync();
-      for (const table of tables.items) {
-        const range = table.getRange();
-        range.font.size = 10;
-        range.font.name = 'Times New Roman';
-      }
-      await context.sync();
-    } catch (e) {
-      // テーブルなしの場合はスキップ
-    }
+    // テーブルは触らない（Office.jsでのテーブル操作は不安定なため）
+    // テーブルの書式調整はPython CLI版を使用してください
 
     // フッターにページ番号
     if (doFooter) {
