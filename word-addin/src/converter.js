@@ -573,6 +573,13 @@ function transformBodyOoxml(ooxml, options) {
   for (const paragraph of bodyParagraphs) {
     let text = getParagraphText(paragraph);
 
+    // 先頭全角スペース除去（冒頭セクション含む全段落）
+    const strippedLeading = text.replace(/^[\u3000 \t]+/, '');
+    if (strippedLeading !== text) {
+      setParagraphText(paragraph, strippedLeading);
+      text = strippedLeading;
+    }
+
     if (doZenkaku && text) {
       const converted = toZenkaku(text);
       if (converted !== text) {
