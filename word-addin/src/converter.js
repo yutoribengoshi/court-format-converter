@@ -146,6 +146,60 @@ function isHeaderSection(text) {
 }
 
 // ============================================================
+// 見出し番号の剥ぎ取りと再付番
+// ============================================================
+
+const HEADING_STRIP_RE = new RegExp(
+  '^[\\s\u3000]*(?:' +
+  '第[１２３４５６７８９０\\d]+' +
+  '|[\\(（][１２３４５６７８９０\\d]+[\\)）]' +
+  '|[\\(（][ｱ-ﾝア-ン]+[\\)）]' +
+  '|[\\(（][a-zａ-ｚ]+[\\)）]' +
+  '|[１２３４５６７８９０\\d]+' +
+  '|[ア-ン]' +
+  '|[ａ-ｚ]' +
+  ')[\\s\u3000]*'
+);
+
+const ZEN_DIGITS = '０１２３４５６７８９';
+const ZEN_KATAKANA = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワ';
+const HAN_KATAKANA = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜ';
+const ZEN_ALPHA = 'ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ';
+const HAN_ALPHA = 'abcdefghijklmnopqrstuvwxyz';
+
+function toZenkakuNum(n) {
+  return String(n).split('').map(d => ZEN_DIGITS[parseInt(d)]).join('');
+}
+
+function generateHeadingNumber(level, counter) {
+  if (level === 1) return `第${toZenkakuNum(counter)}\u3000`;
+  if (level === 2) return `${toZenkakuNum(counter)}\u3000`;
+  if (level === 3) return `(${counter})\u3000`;
+  if (level === 4) return `${ZEN_KATAKANA[counter - 1] || ZEN_KATAKANA[0]}\u3000`;
+  if (level === 5) return `(${HAN_KATAKANA[counter - 1] || HAN_KATAKANA[0]})\u3000`;
+  if (level === 6) return `${ZEN_ALPHA[counter - 1] || ZEN_ALPHA[0]}\u3000`;
+  if (level === 7) return `(${HAN_ALPHA[counter - 1] || HAN_ALPHA[0]})\u3000`;
+  return '';
+}
+
+function stripHeadingNumber(text) {
+  return text.replace(HEADING_STRIP_RE, '');
+}
+
+class HeadingCounter {
+  constructor() {
+    this._counts = {1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0};
+  }
+  increment(level) {
+    this._counts[level]++;
+    for (let lv = level + 1; lv <= 7; lv++) {
+      this._counts[lv] = 0;
+    }
+    return this._counts[level];
+  }
+}
+
+// ============================================================
 // メイン変換処理
 // ============================================================
 
@@ -214,10 +268,11 @@ async function convertDocument(options) {
       }
     }
 
-    // Pass 2: 変換適用
+    // Pass 2: 変換適用（再付番あり）
     let currentHeadingLevel = 0;
     let inHeaderSection = true;
     let firstHeadingFound = false;
+    const counter = new HeadingCounter();
 
     for (const para of paragraphs.items) {
       const text = para.text.trim();
@@ -248,6 +303,13 @@ async function convertDocument(options) {
             firstHeadingFound = true;
             const adjusted = remapLevel(level, levelOffset);
             currentHeadingLevel = adjusted;
+
+            // 再付番
+            const bodyText = stripHeadingNumber(para.text);
+            const count = counter.increment(adjusted);
+            const newText = generateHeadingNumber(adjusted, count) + bodyText;
+            para.insertText(newText, Word.InsertLocation.replace);
+
             para.leftIndent = HEADING_INDENT[adjusted] * FONT.size;
             para.firstLineIndent = 0;
             para.alignment = Word.Alignment.left;
@@ -264,6 +326,13 @@ async function convertDocument(options) {
         if (level !== null) {
           const adjusted = remapLevel(level, levelOffset);
           currentHeadingLevel = adjusted;
+
+          // 再付番
+          const bodyText = stripHeadingNumber(para.text);
+          const count = counter.increment(adjusted);
+          const newText = generateHeadingNumber(adjusted, count) + bodyText;
+          para.insertText(newText, Word.InsertLocation.replace);
+
           para.leftIndent = HEADING_INDENT[adjusted] * FONT.size;
           para.firstLineIndent = 0;
           para.alignment = Word.Alignment.left;

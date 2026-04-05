@@ -174,6 +174,92 @@ def is_header_section(text):
 
 
 # ============================================================
+# 見出し番号の剥ぎ取りと再付番
+# ============================================================
+
+# 見出し番号を剥ぎ取る正規表現（全パターン対応）
+HEADING_STRIP_RE = re.compile(
+    r'^[\s　]*'
+    r'(?:'
+    r'第[１２３４５６７８９０\d]+'          # 第１、第２
+    r'|[\(（][１２３４５６７８９０\d]+[\)）]'  # (1)、（１）
+    r'|[\(（][ｱ-ﾝア-ン]+[\)）]'             # (ｱ)、（ア）
+    r'|[\(（][a-zａ-ｚ]+[\)）]'             # (a)、（ａ）
+    r'|[１２３４５６７８９０\d]+'            # １、２
+    r'|[ア-ン]'                             # ア、イ
+    r'|[ａ-ｚ]'                             # ａ、ｂ
+    r')'
+    r'[\s　]*'  # 番号の後のスペース
+)
+
+# 全角数字テーブル
+_ZEN_DIGITS = '０１２３４５６７８９'
+# 全角カタカナ順
+_ZEN_KATAKANA = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワ'
+# 半角カタカナ順
+_HAN_KATAKANA = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜ'
+# 全角小文字英字順
+_ZEN_ALPHA = 'ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ'
+# 半角小文字英字順
+_HAN_ALPHA = 'abcdefghijklmnopqrstuvwxyz'
+
+
+def _to_zenkaku_num(n):
+    """整数を全角数字文字列に変換。"""
+    return ''.join(_ZEN_DIGITS[int(d)] for d in str(n))
+
+
+def generate_heading_number(level, counter):
+    """レベルとカウンター値から裁判所書式の見出し番号を生成。"""
+    if level == 1:
+        return f'第{_to_zenkaku_num(counter)}　'
+    elif level == 2:
+        return f'{_to_zenkaku_num(counter)}　'
+    elif level == 3:
+        return f'({counter})　'
+    elif level == 4:
+        idx = counter - 1
+        if idx < len(_ZEN_KATAKANA):
+            return f'{_ZEN_KATAKANA[idx]}　'
+        return f'{_ZEN_KATAKANA[0]}　'
+    elif level == 5:
+        idx = counter - 1
+        if idx < len(_HAN_KATAKANA):
+            return f'({_HAN_KATAKANA[idx]})　'
+        return f'({_HAN_KATAKANA[0]})　'
+    elif level == 6:
+        idx = counter - 1
+        if idx < len(_ZEN_ALPHA):
+            return f'{_ZEN_ALPHA[idx]}　'
+        return f'{_ZEN_ALPHA[0]}　'
+    elif level == 7:
+        idx = counter - 1
+        if idx < len(_HAN_ALPHA):
+            return f'({_HAN_ALPHA[idx]})　'
+        return f'({_HAN_ALPHA[0]})　'
+    return ''
+
+
+def strip_heading_number(text):
+    """見出しテキストから既存の番号部分を除去し、本文部分だけ返す。"""
+    return HEADING_STRIP_RE.sub('', text, count=1)
+
+
+class HeadingCounter:
+    """階層別の見出しカウンター。上位レベルが進むと下位をリセット。"""
+
+    def __init__(self):
+        self._counts = {i: 0 for i in range(1, 8)}
+
+    def increment(self, level):
+        """指定レベルのカウンターを進め、下位レベルをリセット。"""
+        self._counts[level] += 1
+        for lv in range(level + 1, 8):
+            self._counts[lv] = 0
+        return self._counts[level]
+
+
+# ============================================================
 # フォント設定
 # ============================================================
 
@@ -401,9 +487,10 @@ def convert(input_path, output_path=None):
     setup_page(doc)
     setup_default_style(doc)
 
-    # Pass 2: 変換適用
+    # Pass 2: 変換適用（再付番あり）
     current_heading_level = 0
     in_header_section = True
+    counter = HeadingCounter()
 
     for para in doc.paragraphs:
         for run in para.runs:
@@ -430,6 +517,20 @@ def convert(input_path, output_path=None):
             if level is not None:
                 adjusted = _remap_level(level, level_offset)
                 current_heading_level = adjusted
+
+                # 再付番: 元の番号を剥がして裁判所書式の番号に置換
+                body_text = strip_heading_number(para.text)
+                count = counter.increment(adjusted)
+                new_number = generate_heading_number(adjusted, count)
+                new_text = new_number + body_text
+
+                # 段落テキストを置換（最初のrunに全テキスト、残りを空に）
+                for i, run in enumerate(para.runs):
+                    if i == 0:
+                        run.text = new_text
+                    else:
+                        run.text = ''
+
                 set_heading_indent(para, adjusted)
                 para.alignment = WD_ALIGN_PARAGRAPH.LEFT
             else:
