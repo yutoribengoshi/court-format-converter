@@ -161,4 +161,5 @@ MIT License
 
 ## 作者
 
-関 智之（Tomoyuki Seki） — 弁護士
+関 智之（Tomoyuki Seki）
+弁護士（東京弁護士会所属）/ 中野通り法律事務所
