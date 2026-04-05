@@ -420,15 +420,18 @@ def add_page_number(doc):
 def format_tables(doc):
     """テーブルのフォントを10ptに縮小、セル内インデントをリセット、列幅を自動調整。"""
     for table in doc.tables:
-        # 列幅自動調整
         tbl = table._tbl
         tblPr = tbl.find(qn('w:tblPr'))
-        if tblPr is not None:
-            existing = tblPr.find(qn('w:tblLayout'))
-            if existing is not None:
-                tblPr.remove(existing)
-            layout = parse_xml(f'<w:tblLayout {nsdecls("w")} w:type="autofit"/>')
-            tblPr.append(layout)
+        if tblPr is None:
+            tblPr = parse_xml(f'<w:tblPr {nsdecls("w")}/>')
+            tbl.insert(0, tblPr)
+
+        # 列幅自動調整
+        existing = tblPr.find(qn('w:tblLayout'))
+        if existing is not None:
+            tblPr.remove(existing)
+        layout = parse_xml(f'<w:tblLayout {nsdecls("w")} w:type="autofit"/>')
+        tblPr.append(layout)
 
         for row in table.rows:
             for cell in row.cells:
