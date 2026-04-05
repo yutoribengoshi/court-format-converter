@@ -225,10 +225,14 @@ async function setupFormat() {
       ps.rightMargin = PAGE.rightMargin;
     }
 
-    // デフォルトフォント設定
-    const body = context.document.body;
-    body.font.name = FONT.western;
-    body.font.size = FONT.size;
+    // Normalスタイルのデフォルトフォントを設定
+    // 既存のテキスト（テーブル等）は変更せず、新規入力テキストに適用
+    const normalStyle = context.document.getStyles().getByNameOrNullObject('Normal');
+    await context.sync();
+    if (!normalStyle.isNullObject) {
+      normalStyle.font.name = FONT.western;
+      normalStyle.font.size = FONT.size;
+    }
 
     await context.sync();
   });
