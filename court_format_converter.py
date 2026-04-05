@@ -612,7 +612,18 @@ def convert(input_path, output_path=None):
                             else:
                                 run.text = ''
 
-                    set_body_indent(para, current_heading_level)
+                    # 箇条書き（１．, ２．等）はぶら下げインデントで番号後に揃える
+                    current_text = para.runs[0].text if para.runs else stripped
+                    list_match = re.match(r'^[０-９\d]+．', current_text)
+                    if list_match:
+                        num_width = len(list_match.group())  # 番号部分の文字数
+                        body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
+                        # 左インデント = 本文位置 + 番号幅、ぶら下げ = 番号幅
+                        total_left = (body_left + num_width) * CHAR_WIDTH
+                        hang = num_width * CHAR_WIDTH
+                        _set_indent_twips(para, left_twips=total_left, hanging_twips=hang)
+                    else:
+                        set_body_indent(para, current_heading_level)
                     if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
                         para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
