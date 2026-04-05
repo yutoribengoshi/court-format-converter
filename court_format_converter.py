@@ -622,15 +622,24 @@ def convert(input_path, output_path=None):
                             else:
                                 run.text = ''
 
-                    # 箇条書き（１．, ２．等）はぶら下げインデントで番号後に揃える
+                    # 箇条書きはぶら下げインデントで記号後に揃える
                     current_text = para.runs[0].text if para.runs else stripped
+                    # 番号付き: １．, ２．等（全角）
                     list_match = re.match(r'^[０-９\d]+．', current_text)
+                    # 記号付き: ・, -, －, ※, ①②③等
+                    bullet_match = re.match(r'^[・－\-※①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]', current_text)
                     if list_match:
-                        num_width_twips = len(list_match.group()) * _F  # 全角文字数 * 全角幅
+                        marker_twips = len(list_match.group()) * _F
                         body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
                         _set_indent_twips(para,
-                                          left_twips=body_left + num_width_twips,
-                                          hanging_twips=num_width_twips)
+                                          left_twips=body_left + marker_twips,
+                                          hanging_twips=marker_twips)
+                    elif bullet_match:
+                        marker_twips = _F  # 記号1文字分
+                        body_left, _ = BODY_INDENT.get(current_heading_level, (0, 0))
+                        _set_indent_twips(para,
+                                          left_twips=body_left + marker_twips,
+                                          hanging_twips=marker_twips)
                     else:
                         set_body_indent(para, current_heading_level)
                     if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
