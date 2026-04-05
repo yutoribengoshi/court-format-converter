@@ -114,6 +114,16 @@
     }
     #status.error { color: #d13438; }
     #status.success { color: #107c10; }
+    .note {
+      margin-top: 16px;
+      padding: 10px 12px;
+      font-size: 11px;
+      color: #666;
+      background: #f5f5f5;
+      border-left: 3px solid #0078d4;
+      border-radius: 3px;
+      line-height: 1.5;
+    }
     .footer {
       margin-top: 24px;
       padding-top: 12px;
@@ -156,6 +166,10 @@
   <button class="secondary" id="btnSetup">書式設定</button>
   <button class="primary" id="btnConvert">変換を実行</button>
   <div id="status"></div>
+
+  <div class="note">
+    行間が広く感じる場合は、変換後にWordの「レイアウト」→「ページ設定」→「行数」を26行から増やすと調整できます（裁判所提出書面は26行が標準です）。
+  </div>
 
   <div class="footer">
     <a href="https://github.com/yutoribengoshi/court-format-converter" target="_blank">court-format-converter</a>
