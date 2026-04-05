@@ -20,7 +20,7 @@ async function onSetup() {
 
   try {
     await setupFormat();
-    status.textContent = '書式設定完了: ページ設定・フォント（MS 明朝 12pt）';
+    status.textContent = '書式設定完了: ページ設定';
     status.className = 'success';
   } catch (error) {
     console.error('書式設定エラー:', error);
