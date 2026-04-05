@@ -185,9 +185,9 @@ async function convertDocument(options) {
       await context.sync();
     }
 
-    // 段落読み込み（テーブル内段落を判別するためparentTableも取得）
+    // 段落読み込み
     const paragraphs = context.document.body.paragraphs;
-    paragraphs.load('text, font, alignment, parentTableOrNullObject');
+    paragraphs.load('text, font, alignment');
     await context.sync();
 
     // レベルオフセット算出
@@ -218,11 +218,6 @@ async function convertDocument(options) {
     const ctr = new Counter();
 
     for (const para of paragraphs.items) {
-      // テーブル内の段落はスキップ（テーブルは別処理）
-      if (para.parentTableOrNullObject && !para.parentTableOrNullObject.isNullObject) {
-        continue;
-      }
-
       const text = para.text.trim();
 
       // フォント
