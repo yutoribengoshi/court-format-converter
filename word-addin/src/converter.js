@@ -274,12 +274,12 @@ async function convertDocument(options) {
       await context.sync();
     }
 
-    // 段落処理
-    const paragraphs = context.document.body.paragraphs;
-    paragraphs.load('text, font, alignment, leftIndent, firstLineIndent');
+    // ========== Phase 1: テキスト修正（全角変換・スペース除去・再付番）==========
+    let paragraphs = context.document.body.paragraphs;
+    paragraphs.load('text, font, alignment');
     await context.sync();
 
-    // Pass 1: レベルオフセット算出
+    // レベルオフセット算出
     let levelOffset = 0;
     if (doIndent) {
       let inHdr = true;
@@ -289,14 +289,9 @@ async function convertDocument(options) {
         if (!t) continue;
         if (inHdr) {
           const lv = detectHeadingLevel(t);
-          if (lv !== null) {
-            inHdr = false;
-            foundLevels.push(lv);
-          } else if (isHeaderSection(t)) {
-            continue;
-          } else {
-            continue;
-          }
+          if (lv !== null) { inHdr = false; foundLevels.push(lv); }
+          else if (isHeaderSection(t)) continue;
+          else continue;
         } else {
           const lv = detectHeadingLevel(t);
           if (lv !== null) foundLevels.push(lv);
@@ -307,33 +302,85 @@ async function convertDocument(options) {
       }
     }
 
-    // Pass 2: 変換適用
-    let currentHeadingLevel = 0;
-    let inHeaderSection = true;
-    let firstHeadingFound = false;
-    const counter = new HeadingCounter();
+    // テキスト修正パス
+    {
+      let inHdr = true;
+      let firstHdg = false;
+      const ctr = new HeadingCounter();
 
-    for (const para of paragraphs.items) {
-      const text = para.text.trim();
+      for (const para of paragraphs.items) {
+        const text = para.text.trim();
 
-      // フォント統一（本文のみ、テーブルは別処理）
-      if (doFont) {
-        para.font.name = FONT.western;
-        para.font.size = FONT.size;
-      }
+        // フォント統一
+        if (doFont) {
+          para.font.name = FONT.western;
+          para.font.size = FONT.size;
+        }
 
-      // 半角→全角変換
-      if (doZenkaku && text) {
-        const converted = toZenkaku(para.text);
-        if (converted !== para.text) {
-          para.insertText(converted, Word.InsertLocation.replace);
+        // 半角→全角変換
+        if (doZenkaku && text) {
+          const converted = toZenkaku(para.text);
+          if (converted !== para.text) {
+            para.insertText(converted, Word.InsertLocation.replace);
+          }
+        }
+
+        if (!text) continue;
+
+        if (doIndent) {
+          if (inHdr && !firstHdg) {
+            const level = detectHeadingLevel(text);
+            if (level !== null) {
+              inHdr = false;
+              firstHdg = true;
+              const adj = remapLevel(level, levelOffset);
+              const body = stripHeadingNumber(para.text);
+              const num = generateHeadingNumber(adj, ctr.increment(adj));
+              para.insertText(num + body, Word.InsertLocation.replace);
+            } else if (isHeaderSection(text)) {
+              if (TITLE_PATTERN.test(text)) {
+                para.font.size = 16;
+                para.font.bold = true;
+              }
+            }
+            continue;
+          }
+
+          const level = detectHeadingLevel(text);
+          if (level !== null) {
+            const adj = remapLevel(level, levelOffset);
+            const body = stripHeadingNumber(para.text);
+            const num = generateHeadingNumber(adj, ctr.increment(adj));
+            para.insertText(num + body, Word.InsertLocation.replace);
+          } else if (!SKIP_PATTERN.test(text)) {
+            // 本文: 先頭全角スペース除去
+            const raw = para.text;
+            const stripped = stripLeadingSpaces(raw);
+            if (stripped !== raw) {
+              para.insertText(stripped, Word.InsertLocation.replace);
+            }
+          }
         }
       }
+    }
 
-      if (!text) continue;
+    // テキスト修正をコミット
+    await context.sync();
 
-      // インデント処理
-      if (doIndent) {
+    // ========== Phase 2: インデント設定（修正後のテキストを再読み込み）==========
+    if (doIndent) {
+      paragraphs = context.document.body.paragraphs;
+      paragraphs.load('text, alignment, leftIndent, firstLineIndent');
+      await context.sync();
+
+      let currentHeadingLevel = 0;
+      let inHeaderSection = true;
+      let firstHeadingFound = false;
+
+      for (const para of paragraphs.items) {
+        const text = para.text.trim();
+        if (!text) continue;
+
         // 冒頭セクション判定
         if (inHeaderSection && !firstHeadingFound) {
           const level = detectHeadingLevel(text);
@@ -343,24 +390,12 @@ async function convertDocument(options) {
             const adjusted = remapLevel(level, levelOffset);
             currentHeadingLevel = adjusted;
 
-            // 再付番
-            const bodyText = stripHeadingNumber(para.text);
-            const count = counter.increment(adjusted);
-            const newText = generateHeadingNumber(adjusted, count) + bodyText;
-            para.insertText(newText, Word.InsertLocation.replace);
-
-            // ぶら下げインデント（twips→pt変換: CHAR_PT）
             const [titleStart, numHang] = HEADING_LEVELS[adjusted];
             para.leftIndent = titleStart * CHAR_PT;
             para.firstLineIndent = -(numHang * CHAR_PT);
             para.alignment = Word.Alignment.left;
             continue;
           } else if (isHeaderSection(text)) {
-            // タイトル行を16pt太字に
-            if (TITLE_PATTERN.test(text)) {
-              para.font.size = 16;
-              para.font.bold = true;
-            }
             continue;
           } else {
             continue;
@@ -373,13 +408,6 @@ async function convertDocument(options) {
           const adjusted = remapLevel(level, levelOffset);
           currentHeadingLevel = adjusted;
 
-          // 再付番
-          const bodyText = stripHeadingNumber(para.text);
-          const count = counter.increment(adjusted);
-          const newText = generateHeadingNumber(adjusted, count) + bodyText;
-          para.insertText(newText, Word.InsertLocation.replace);
-
-          // ぶら下げインデント
           const [titleStart, numHang] = HEADING_LEVELS[adjusted];
           para.leftIndent = titleStart * CHAR_PT;
           para.firstLineIndent = -(numHang * CHAR_PT);
@@ -389,16 +417,8 @@ async function convertDocument(options) {
           para.leftIndent = 0;
           para.firstLineIndent = 0;
         } else {
-          // 本文: 先頭全角スペース除去
-          const raw = para.text;
-          const stripped = stripLeadingSpaces(raw);
-          if (stripped !== raw) {
-            para.insertText(stripped, Word.InsertLocation.replace);
-          }
-
-          // 箇条書き（１．等）はぶら下げインデント
-          const currentText = stripped || raw;
-          const listMatch = currentText.match(LIST_PATTERN);
+          // 箇条書き
+          const listMatch = text.match(LIST_PATTERN);
           if (listMatch) {
             const numWidth = listMatch[0].length;
             const [bodyLeft] = BODY_INDENT[currentHeadingLevel] || [0, 0];
@@ -415,9 +435,9 @@ async function convertDocument(options) {
           }
         }
       }
-    }
 
-    await context.sync();
+      await context.sync();
+    }
 
     // フッターにページ番号
     if (doFooter) {
