@@ -51,6 +51,7 @@ BODY_INDENT[0] = [0, _F];
 
 const TITLE_PATTERN = /(準備書面|訴状|答弁書|意見書|報告書|申立書|陳述書|上申書|申請書|請求書|通知書|催告書|告訴状|告発状|嘆願書|抗告理由書|控訴理由書|上告理由書)/;
 const LIST_PATTERN = /^[０-９\d]+．/;
+const BULLET_PATTERN = /^[・－\-※①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/;
 
 const FOOTER_PAGE_NUMBER_OOXML =
   '<pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage">' +
@@ -657,8 +658,11 @@ function transformBodyOoxml(ooxml, options) {
         }
 
         const listMatch = text.match(LIST_PATTERN);
+        const bulletMatch = text.match(BULLET_PATTERN);
         if (listMatch) {
           setListIndent(paragraph, currentHeadingLevel, listMatch[0].length);
+        } else if (bulletMatch) {
+          setListIndent(paragraph, currentHeadingLevel, 1); // 記号1文字分
         } else {
           setBodyIndent(paragraph, currentHeadingLevel);
         }
