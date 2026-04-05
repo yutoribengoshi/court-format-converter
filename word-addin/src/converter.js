@@ -373,6 +373,18 @@ async function convertDocument(options) {
       paragraphs.load('text, alignment, leftIndent, firstLineIndent');
       await context.sync();
 
+      // 全段落の既存インデントをリセット（leftChars等の残骸を消す）
+      for (const para of paragraphs.items) {
+        para.leftIndent = 0;
+        para.firstLineIndent = 0;
+      }
+      await context.sync();
+
+      // 再読み込み
+      paragraphs = context.document.body.paragraphs;
+      paragraphs.load('text, alignment, leftIndent, firstLineIndent');
+      await context.sync();
+
       let currentHeadingLevel = 0;
       let inHeaderSection = true;
       let firstHeadingFound = false;
