@@ -451,6 +451,39 @@ async function convertDocument(options) {
       await context.sync();
     }
 
+    // ========== Phase 3: テーブル処理（10pt、インデントリセット）==========
+    {
+      const tables = context.document.body.tables;
+      tables.load('rows');
+      await context.sync();
+
+      for (const table of tables.items) {
+        const rows = table.rows;
+        rows.load('cells');
+        await context.sync();
+
+        for (const row of rows.items) {
+          const cells = row.cells;
+          cells.load('body');
+          await context.sync();
+
+          for (const cell of cells.items) {
+            const cellParas = cell.body.paragraphs;
+            cellParas.load('font, leftIndent, firstLineIndent');
+            await context.sync();
+
+            for (const p of cellParas.items) {
+              p.font.size = 10;
+              p.font.name = FONT.western;
+              p.leftIndent = 0;
+              p.firstLineIndent = 0;
+            }
+          }
+        }
+      }
+      await context.sync();
+    }
+
     // フッターにページ番号
     if (doFooter) {
       const sections = context.document.sections;
