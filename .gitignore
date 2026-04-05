@@ -9,3 +9,4 @@ build/
 !examples/*.docx
 .DS_Store
 .venv/
+~$*
