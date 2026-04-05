@@ -15,7 +15,8 @@ const PAGE = {
   rightMargin: 56.69,  // 20mm
 };
 
-const CHAR_WIDTH = 242; // twips (12pt MS明朝 + グリッド補正)
+// 1全角文字 = 245 twips (12pt MS明朝基準)
+const CHAR_TWIPS = 245;
 const BODY_FONT_SIZE = 12;
 const TABLE_FONT_SIZE = 10;
 const TITLE_FONT_SIZE = 16;
@@ -24,30 +25,40 @@ const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PKG_NS = 'http://schemas.microsoft.com/office/2006/xmlPackage';
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
 
-// twips直接指定。半角括弧(L3,L5,L7)は幅が狭い。
-const _F = 242; // full-width char
-const _H = 121; // half-width char
-const _NF = 2 * _F;         // 全角番号幅（「１　」等）
-const _NH = 3 * _H + _F;    // 半角括弧番号幅（「(1)　」等）
-// 番号開始位置: L1=0, L2=2, L3=3, L4=4, L5=5, L6=6, L7=7
+// 見出しレベルごとの設定: [left_chars, 番号説明]
+// 全角文字単位の整数。半角は使わない。
 const HEADING_LEVELS = {
-  1: [0*_F + 3*_F, 3*_F],
-  2: [2*_F + _NF, _NF],
-  3: [3*_F + _NH, _NH],
-  4: [4*_F + _NF, _NF],
-  5: [5*_F + _NH, _NH],
-  6: [6*_F + _NF, _NF],
-  7: [7*_F + _NH, _NH],
+  1: [0, '第１'],
+  2: [2, '１'],
+  3: [3, '(1)'],
+  4: [4, 'ア'],
+  5: [5, '(ｱ)'],
+  6: [6, 'ａ'],
+  7: [7, '(a)'],
 };
 
-// [left_twips, firstLine_twips]
-// left + firstLine = title_start（1行目が見出しタイトルと揃う）
-// left = title_start - 1全角（2行目は1字左）
-const BODY_INDENT = {};
-for (const [lv, [ts]] of Object.entries(HEADING_LEVELS)) {
-  BODY_INDENT[lv] = [ts - _F, _F];
-}
-BODY_INDENT[0] = [0, _F];
+// 本文インデント: [left_chars, first_line_chars]
+const BODY_INDENT = {
+  0: [0, 1],
+  1: [2, 1],
+  2: [2, 1],
+  3: [3, 1],
+  4: [4, 1],
+  5: [5, 1],
+  6: [6, 1],
+  7: [7, 1],
+};
+
+// 見出しレベルごとのぶら下げ幅（全角文字単位）
+const _HEADING_HANGING = {
+  1: 0,
+  2: 1,
+  3: 3,
+  4: 1,
+  5: 3,
+  6: 1,
+  7: 3,
+};
 
 const TITLE_PATTERN = /(準備書面|訴状|答弁書|意見書|報告書|申立書|陳述書|上申書|申請書|請求書|通知書|催告書|告訴状|告発状|嘆願書|抗告理由書|控訴理由書|上告理由書)/;
 const LIST_PATTERN = /^[０-９\d]+．/;
@@ -103,9 +114,9 @@ function toZenkaku(text) {
 
 const HEADING_PATTERNS = [
   { level: 1, re: /^[\s\u3000]*第[１２３４５６７８９０\d]+[\s\u3000]/ },
-  { level: 3, re: /^[\s\u3000]*[(\uff08][１２３４５６７８９０\d]+[)\uff09][\s\u3000]/ },
-  { level: 5, re: /^[\s\u3000]*[(\uff08][ｱ-ﾝア-ン]+[)\uff09][\s\u3000]/ },
-  { level: 7, re: /^[\s\u3000]*[(\uff08][a-zａ-ｚ]+[)\uff09][\s\u3000]/ },
+  { level: 3, re: /^[\s\u3000]*[(\uff08][１２３４５６７８９０\d]+[)\uff09][\s\u3000]?/ },
+  { level: 5, re: /^[\s\u3000]*[(\uff08][ｱ-ﾝア-ン]+[)\uff09][\s\u3000]?/ },
+  { level: 7, re: /^[\s\u3000]*[(\uff08][a-zａ-ｚ]+[)\uff09][\s\u3000]?/ },
   { level: 2, re: /^[\s\u3000]*[１２３４５６７８９０\d]+[\s\u3000]/ },
   { level: 4, re: /^[\s\u3000]*[ア-ン][\u3000\s]/ },
   { level: 6, re: /^[\s\u3000]*[ａ-ｚ][\u3000\s]/ },
@@ -441,49 +452,66 @@ function clearParagraphIndent(paragraph) {
   removeDirectWordChildren(paragraphProps, 'ind');
 }
 
-function setParagraphIndent(paragraph, { leftTwips = 0, hangingTwips = 0, firstLineTwips = 0 } = {}) {
+function setIndent(paragraph, { leftChars = 0, hangingChars = 0, firstLineChars = 0 } = {}) {
   clearParagraphIndent(paragraph);
 
-  if (!leftTwips && !hangingTwips && !firstLineTwips) {
+  if (!leftChars && !hangingChars && !firstLineChars) {
     return;
   }
 
   const indentNode = createWordElement(paragraph.ownerDocument, 'ind');
-  if (leftTwips) {
-    setWordAttr(indentNode, 'left', leftTwips);
+  if (leftChars) {
+    setWordAttr(indentNode, 'leftChars', leftChars * 100);
+    setWordAttr(indentNode, 'left', leftChars * CHAR_TWIPS);
   }
-  if (hangingTwips) {
-    setWordAttr(indentNode, 'hanging', hangingTwips);
-  }
-  if (firstLineTwips) {
-    setWordAttr(indentNode, 'firstLine', firstLineTwips);
+  if (hangingChars) {
+    setWordAttr(indentNode, 'hangingChars', hangingChars * 100);
+    setWordAttr(indentNode, 'hanging', hangingChars * CHAR_TWIPS);
+  } else if (firstLineChars) {
+    setWordAttr(indentNode, 'firstLineChars', firstLineChars * 100);
+    setWordAttr(indentNode, 'firstLine', firstLineChars * CHAR_TWIPS);
   }
 
   ensureParagraphProperties(paragraph).appendChild(indentNode);
 }
 
 function setHeadingIndent(paragraph, level) {
-  const [titleStart, numberHang] = HEADING_LEVELS[level];
-  setParagraphIndent(paragraph, {
-    leftTwips: titleStart,
-    hangingTwips: numberHang,
-  });
+  const leftChars = HEADING_LEVELS[level][0];
+
+  // 番号部分を除いた本文の長さで判定
+  const text = getParagraphText(paragraph).trim();
+  const body = text.replace(
+    /^[\s\u3000]*(第[１-９０-９\d]+|[１-９０-９\d]+|[(\uff08][１-９０-９\d]+[)\uff09]|[ア-ン]|[(\uff08][ｱ-ﾝ]+[)\uff09]|[ａ-ｚ]|[(\uff08][a-z]+[)\uff09])[\s\u3000]*/,
+    '');
+
+  if (body.length > 20) {
+    // 本文兼用 → ぶら下げインデント
+    const hanging = _HEADING_HANGING[level] || 1;
+    if (level === 1) {
+      setIndent(paragraph, { leftChars });
+    } else {
+      setIndent(paragraph, { leftChars, hangingChars: hanging });
+    }
+  } else {
+    // 短い小タイトル → 左インデント0、首行1字下げ
+    if (level === 1) {
+      setIndent(paragraph, { leftChars: 0 });
+    } else {
+      setIndent(paragraph, { leftChars: 0, firstLineChars: 1 });
+    }
+  }
 }
 
 function setBodyIndent(paragraph, currentHeadingLevel) {
-  const [left, firstLine] = BODY_INDENT[currentHeadingLevel] || [0, _F];
-  setParagraphIndent(paragraph, {
-    leftTwips: left,
-    firstLineTwips: firstLine,
-  });
+  const [left, fl] = BODY_INDENT[currentHeadingLevel] || [0, 1];
+  setIndent(paragraph, { leftChars: left, firstLineChars: fl });
 }
 
 function setListIndent(paragraph, currentHeadingLevel, markerLength) {
   const [bodyLeft] = BODY_INDENT[currentHeadingLevel] || [0, 0];
-  const markerTwips = markerLength * _F;
-  setParagraphIndent(paragraph, {
-    leftTwips: bodyLeft + markerTwips,
-    hangingTwips: markerTwips,
+  setIndent(paragraph, {
+    leftChars: bodyLeft + markerLength,
+    hangingChars: markerLength,
   });
 }
 
