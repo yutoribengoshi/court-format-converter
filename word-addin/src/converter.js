@@ -25,17 +25,19 @@ const PKG_NS = 'http://schemas.microsoft.com/office/2006/xmlPackage';
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
 
 // twips直接指定。半角括弧(L3,L5,L7)は幅が狭い。
-// [title_start_twips, number_hang_twips]
 const _F = 242; // full-width char
 const _H = 121; // half-width char
+const _NF = 2 * _F;         // 全角番号幅（「１　」等）
+const _NH = 3 * _H + _F;    // 半角括弧番号幅（「(1)　」等）
+// 番号開始位置: L1=0, L2=2, L3=3, L4=4, L5=5, L6=6, L7=7
 const HEADING_LEVELS = {
-  1: [3*_F, 3*_F],
-  2: [2*_F+2*_F, 2*_F],
-  3: [2*_F+2*_F+3*_H+_F, 3*_H+_F],
-  4: [2*_F+2*_F+2*_F, 2*_F],
-  5: [2*_F+2*_F+2*_F+3*_H+_F, 3*_H+_F],
-  6: [2*_F+2*_F+2*_F+2*_F, 2*_F],
-  7: [2*_F+2*_F+2*_F+2*_F+3*_H+_F, 3*_H+_F],
+  1: [0*_F + 3*_F, 3*_F],
+  2: [2*_F + _NF, _NF],
+  3: [3*_F + _NH, _NH],
+  4: [4*_F + _NF, _NF],
+  5: [5*_F + _NH, _NH],
+  6: [6*_F + _NF, _NF],
+  7: [7*_F + _NH, _NH],
 };
 
 // [left_twips, firstLine_twips]
