@@ -151,6 +151,13 @@ HEADER_PATTERNS = [
     re.compile(r'^[\s　]*(第[０-９\d]+[　\s])'),
 ]
 
+# タイトル行の判定（16pt太字にする対象）
+TITLE_PATTERN = re.compile(
+    r'(準備書面|訴状|答弁書|意見書|報告書|申立書|陳述書|上申書|'
+    r'申請書|請求書|通知書|催告書|告訴状|告発状|嘆願書|'
+    r'抗告理由書|控訴理由書|上告理由書)'
+)
+
 
 def detect_heading_level(text):
     """段落テキストから見出しレベルを判定。見出しでなければ None を返す。
@@ -557,6 +564,11 @@ def convert(input_path, output_path=None):
             if level is not None:
                 in_header_section = False
             elif is_header_section(text):
+                # タイトル行を検出して16pt太字に
+                if TITLE_PATTERN.search(text):
+                    set_paragraph_font(para, size=16)
+                    for run in para.runs:
+                        run.font.bold = True
                 continue
             else:
                 continue

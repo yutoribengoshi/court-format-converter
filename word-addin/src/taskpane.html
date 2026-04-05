@@ -42,6 +42,20 @@
       color: #888;
       margin-bottom: 12px;
     }
+    .spec-list {
+      font-size: 11px;
+      color: #555;
+    }
+    .spec-row {
+      display: flex;
+      padding: 2px 0;
+    }
+    .spec-label {
+      width: 60px;
+      font-weight: 600;
+      color: #444;
+      flex-shrink: 0;
+    }
     .checkbox-group {
       display: flex;
       flex-direction: column;
@@ -130,6 +144,17 @@
     </div>
   </div>
 
+  <div class="section">
+    <div class="section-title">書式設定（新規文書用）</div>
+    <div class="section-desc">白紙の文書に以下の書式を適用します</div>
+    <div class="spec-list">
+      <div class="spec-row"><span class="spec-label">用紙</span><span>A4縦</span></div>
+      <div class="spec-row"><span class="spec-label">余白</span><span>上35 下25 左30 右20mm</span></div>
+      <div class="spec-row"><span class="spec-label">行数</span><span>26行 x 37文字</span></div>
+      <div class="spec-row"><span class="spec-label">フォント</span><span>MS 明朝 12pt</span></div>
+      <div class="spec-row"><span class="spec-label">英数字</span><span>Times New Roman 12pt</span></div>
+    </div>
+  </div>
   <button class="secondary" id="btnSetup">書式設定</button>
   <button class="primary" id="btnConvert">変換を実行</button>
   <div id="status"></div>
