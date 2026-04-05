@@ -373,18 +373,6 @@ async function convertDocument(options) {
       paragraphs.load('text, alignment, leftIndent, firstLineIndent');
       await context.sync();
 
-      // 全段落の既存インデントをリセット（leftChars等の残骸を消す）
-      for (const para of paragraphs.items) {
-        para.leftIndent = 0;
-        para.firstLineIndent = 0;
-      }
-      await context.sync();
-
-      // 再読み込み
-      paragraphs = context.document.body.paragraphs;
-      paragraphs.load('text, alignment, leftIndent, firstLineIndent');
-      await context.sync();
-
       let currentHeadingLevel = 0;
       let inHeaderSection = true;
       let firstHeadingFound = false;
@@ -393,7 +381,7 @@ async function convertDocument(options) {
         const text = para.text.trim();
         if (!text) continue;
 
-        // 冒頭セクション判定
+        // 冒頭セクション判定（インデント触らない）
         if (inHeaderSection && !firstHeadingFound) {
           const level = detectHeadingLevel(text);
           if (level !== null) {
@@ -402,6 +390,9 @@ async function convertDocument(options) {
             const adjusted = remapLevel(level, levelOffset);
             currentHeadingLevel = adjusted;
 
+            // リセットしてから設定
+            para.leftIndent = 0;
+            para.firstLineIndent = 0;
             const [titleStart, numHang] = HEADING_LEVELS[adjusted];
             para.leftIndent = titleStart * CHAR_PT;
             para.firstLineIndent = -(numHang * CHAR_PT);
@@ -413,6 +404,10 @@ async function convertDocument(options) {
             continue;
           }
         }
+
+        // リセットしてから設定（leftChars残骸対策）
+        para.leftIndent = 0;
+        para.firstLineIndent = 0;
 
         // 見出し or 本文
         const level = detectHeadingLevel(text);
@@ -426,8 +421,6 @@ async function convertDocument(options) {
           para.alignment = Word.Alignment.left;
         } else if (SKIP_PATTERN.test(text)) {
           para.alignment = Word.Alignment.right;
-          para.leftIndent = 0;
-          para.firstLineIndent = 0;
         } else {
           // 箇条書き
           const listMatch = text.match(LIST_PATTERN);
