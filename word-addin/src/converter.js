@@ -475,8 +475,18 @@ function setIndent(paragraph, { leftChars = 0, hangingChars = 0, firstLineChars 
   ensureParagraphProperties(paragraph).appendChild(indentNode);
 }
 
+function setOutlineLevel(paragraph, level) {
+  const paragraphProps = ensureParagraphProperties(paragraph);
+  removeDirectWordChildren(paragraphProps, 'outlineLvl');
+  // outlineLvl: 0=Level1, 1=Level2, ... 8=本文
+  const olvl = createWordElement(paragraph.ownerDocument, 'outlineLvl');
+  setWordAttr(olvl, 'val', level - 1);
+  paragraphProps.appendChild(olvl);
+}
+
 function setHeadingIndent(paragraph, level) {
   const leftChars = HEADING_LEVELS[level][0];
+  setOutlineLevel(paragraph, level);
 
   // 番号部分を除いた本文の長さで判定
   const text = getParagraphText(paragraph).trim();
@@ -595,6 +605,21 @@ function serializeOoxml(doc) {
   return new XMLSerializer().serializeToString(doc);
 }
 
+// 岡口マクロが設定するスタイル名パターン
+const OKAGUCHI_STYLE_RE = /^(ランク[１-９1-9]|本文[１-９1-9]|標準\(太郎文書スタイル\))/;
+
+function getParagraphStyleId(paragraph) {
+  const pPr = getDirectWordChild(paragraph, 'pPr');
+  if (!pPr) return '';
+  const pStyle = getDirectWordChild(pPr, 'pStyle');
+  if (!pStyle) return '';
+  return getWordAttr(pStyle, 'val');
+}
+
+function hasOkaguchiStyles(paragraphs) {
+  return paragraphs.some((p) => OKAGUCHI_STYLE_RE.test(getParagraphStyleId(p)));
+}
+
 function transformBodyOoxml(ooxml, options) {
   const { font: doFont, indent: doIndent, zenkaku: doZenkaku } = options;
   if (!doFont && !doIndent && !doZenkaku) {
@@ -604,6 +629,30 @@ function transformBodyOoxml(ooxml, options) {
   const xmlDoc = parseOoxmlPackage(ooxml);
   const bodyNode = getBodyNode(xmlDoc);
   const bodyParagraphs = getBodyParagraphs(bodyNode);
+
+  // 岡口マクロスタイル検出: インデント処理をスキップ
+  const skipIndent = doIndent && hasOkaguchiStyles(bodyParagraphs);
+  if (skipIndent) {
+    // 全角変換とフォントのみ実行
+    for (const paragraph of bodyParagraphs) {
+      if (doZenkaku) {
+        const text = getParagraphText(paragraph);
+        if (text) {
+          const converted = toZenkaku(text);
+          if (converted !== text) {
+            setParagraphText(paragraph, converted);
+          }
+        }
+      }
+      if (doFont) {
+        setParagraphFont(paragraph, BODY_FONT_SIZE);
+      }
+    }
+    if (doFont) {
+      formatTables(bodyNode);
+    }
+    return serializeOoxml(xmlDoc);
+  }
 
   const candidateTexts = bodyParagraphs.map((paragraph) => {
     const text = getParagraphText(paragraph);
