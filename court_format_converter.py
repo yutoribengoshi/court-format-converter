@@ -37,21 +37,22 @@ from docx.oxml import parse_xml
 CHAR_TWIPS = 245
 
 # 見出しレベルごとの設定: (left_chars, 番号説明)
+# 「第１」の「１」と単独の「１」が縦に揃う配置
 HEADING_LEVELS = {
-    1: (0, "第１"),    # 第１、第２ …
-    2: (2, "１"),      # １、２ …
-    3: (3, "(1)"),     # (1)、(2) …
-    4: (4, "ア"),      # ア、イ …
-    5: (5, "(ｱ)"),     # (ｱ)、(ｲ) …
-    6: (6, "ａ"),      # ａ、ｂ …
-    7: (7, "(a)"),     # (a)、(b) …
+    1: (0, "第１"),    # 第１ … （左端。第=0字目、１=1字目）
+    2: (1, "１"),      # １ …   （左1字。第１の１と縦揃え）
+    3: (3, "(1)"),     # (1) …
+    4: (4, "ア"),      # ア …
+    5: (5, "(ｱ)"),     # (ｱ) …
+    6: (6, "ａ"),      # ａ …
+    7: (7, "(a)"),     # (a) …
 }
 
-# 本文インデント: 対応するランクと同じ左位置 + 首行1字下げ
+# 本文インデント: 見出し番号の右端位置 + 首行1字下げ
 BODY_INDENT = {
     0: (0, 1),   # 見出しなし直後 → 首行1字のみ
-    1: (2, 1),   # 第１直下 → 左2字 + 首行1字
-    2: (2, 1),   # １直下 → 左2字 + 首行1字
+    1: (1, 1),   # 第１直下 → 左1字 + 首行1字（「第１　」の後）
+    2: (1, 1),   # １直下 → 左1字 + 首行1字（「１　」の後、第１直下と同じ）
     3: (3, 1),   # (1)直下 → 左3字 + 首行1字
     4: (4, 1),   # ア直下 → 左4字 + 首行1字
     5: (5, 1),   # (ｱ)直下 → 左5字 + 首行1字
@@ -562,14 +563,10 @@ def set_heading_indent(para, level):
         # 左インデント = 見出しレベルの基準位置
         # ぶら下げ = 番号+スペースの幅分（1行目を左に出す）
         hanging = _HEADING_HANGING.get(level, 1)
-        # Level 1は特殊: 左0字でぶら下げなし
-        if level == 1:
-            set_indent(para, left_chars=left_chars)
-        else:
-            set_indent(para, left_chars=left_chars, hanging_chars=hanging)
+        set_indent(para, left_chars=left_chars, hanging_chars=hanging)
     else:
-        # 短い小タイトル → インデントなし（番号自体が区切り）
-        set_indent(para)
+        # 短い小タイトル → 左インデントのみ（番号位置に揃える）、首行下げなし
+        set_indent(para, left_chars=left_chars)
 
 
 def set_body_indent(para, current_heading_level):
