@@ -37,19 +37,26 @@ from docx.oxml import parse_xml
 CHAR_TWIPS = 245
 
 # 見出しレベルごとの設定: (left_chars, 番号説明)
-# 岡口マクロ実測値: ランク１=left:490(2字), 本文１=left:490+firstLine:245
+# 岡口マクロVBAソースの実際の値:
+#   第１ = LeftIndent:24pt(2字), FirstLineIndent:-24pt(-2字) → 1行目0字目、2行目2字目
+#   １   = LeftIndent:24pt(2字), FirstLineIndent:-12pt(-1字) → 1行目1字目、2行目2字目
+#   (1)  = LeftIndent:36pt(3字), FirstLineIndent:-12pt(-1字) → 1行目2字目、2行目3字目
+#   ア   = LeftIndent:48pt(4字), FirstLineIndent:-12pt(-1字) → 1行目3字目、2行目4字目
+#   (ア) = LeftIndent:60pt(5字), FirstLineIndent:-12pt(-1字) → 1行目4字目、2行目5字目
+#   ａ   = LeftIndent:72pt(6字), FirstLineIndent:-12pt(-1字) → 1行目5字目、2行目6字目
+#   (a)  = LeftIndent:84pt(7字), FirstLineIndent:-12pt(-1字) → 1行目6字目、2行目7字目
 HEADING_LEVELS = {
-    1: (2, "第１"),    # 第１ … （左2字。岡口マクロ: ランク１=left:490）
-    2: (2, "１"),      # １ …   （左2字。第１の１と同じ位置）
-    3: (3, "(1)"),     # (1) …
-    4: (4, "ア"),      # ア …
-    5: (5, "(ｱ)"),     # (ｱ) …
-    6: (6, "ａ"),      # ａ …
-    7: (7, "(a)"),     # (a) …
+    1: (2, "第１"),    # left=2字
+    2: (2, "１"),      # left=2字
+    3: (3, "(1)"),     # left=3字
+    4: (4, "ア"),      # left=4字
+    5: (5, "(ｱ)"),     # left=5字
+    6: (6, "ａ"),      # left=6字
+    7: (7, "(a)"),     # left=7字
 }
 
-# 本文インデント: 対応するランクと同じ左位置 + 首行1字下げ
-# 岡口マクロ実測値: 本文１=left:490(2字)+firstLine:245(1字)
+# 本文インデント: 見出しと同じ左位置 + 首行1字下げ
+# 岡口マクロVBAソース: 本文は見出しのLeftIndentと同じ値 + FirstLineIndent=12pt(1字)
 BODY_INDENT = {
     0: (0, 1),   # 見出しなし直後 → 首行1字のみ
     1: (2, 1),   # 第１直下 → 左2字 + 首行1字
@@ -528,49 +535,28 @@ def _set_outline_level(para, level):
     pPr.append(olvl)
 
 
-    # 見出しレベルごとのぶら下げ幅（番号+スペース分、全角文字単位）
-    # Level 1: 「第１　」→ ぶら下げ不要（左端から）
-    # Level 2: 「１　」→ 1字ぶら下げ
-    # Level 3: 「（１）」→ 3字ぶら下げ（全角括弧+数字+全角括弧）
-    # Level 4: 「ア　」→ 1字ぶら下げ
-    # Level 5: 「（ｱ）」→ 3字ぶら下げ
-    # Level 6: 「ａ　」→ 1字ぶら下げ
-    # Level 7: 「（a）」→ 3字ぶら下げ
+    # 見出しレベルごとのぶら下げ幅（岡口マクロVBAソースの実際の値）
+    # 全レベル共通: FirstLineIndent = -12pt = -1字
+    # 第１だけ例外: FirstLineIndent = -24pt = -2字
 _HEADING_HANGING = {
-    1: 0,    # 第１ はぶら下げなし
-    2: 1,    # １　 → 1字
-    3: 3,    # （１） → 3字
-    4: 1,    # ア　 → 1字
-    5: 3,    # （ｱ） → 3字
-    6: 1,    # ａ　 → 1字
-    7: 3,    # （a） → 3字
+    1: 2,    # 第１ → 2字ぶら下げ（left2字-hang2字=0字目から）
+    2: 1,    # １　 → 1字ぶら下げ（left2字-hang1字=1字目から）
+    3: 1,    # (1)  → 1字ぶら下げ（left3字-hang1字=2字目から）
+    4: 1,    # ア　 → 1字ぶら下げ（left4字-hang1字=3字目から）
+    5: 1,    # (ア) → 1字ぶら下げ（left5字-hang1字=4字目から）
+    6: 1,    # ａ　 → 1字ぶら下げ（left6字-hang1字=5字目から）
+    7: 1,    # (a)  → 1字ぶら下げ（left7字-hang1字=6字目から）
 }
 
 
 def set_heading_indent(para, level):
     """見出し段落のインデント＋アウトラインレベル設定。
-    短い小タイトル: インデントなし
-    本文兼用（長い）: ぶら下げインデント（2行目以降が番号位置に揃う）
+    岡口マクロVBAソースに準拠: 全レベルでぶら下げインデントを使用。
     アウトラインレベルにより、Wordの目次挿入で自動認識される。"""
     left_chars = HEADING_LEVELS[level][0]
+    hanging = _HEADING_HANGING.get(level, 1)
     _set_outline_level(para, level)
-
-    # 番号部分を除いた本文の長さで判定
-    text = para.text.strip()
-    body = re.sub(
-        r'^[\s　]*(第[１-９０-９\d]+|[１-９０-９\d]+|[\(（][１-９０-９\d]+[\)）]|'
-        r'[ア-ン]|[\(（][ｱ-ﾝ]+[\)）]|[ａ-ｚ]|[\(（][a-z]+[\)）])[\s　]*',
-        '', text)
-
-    if len(body) > 20:
-        # 本文兼用 → ぶら下げインデント
-        # 左インデント = 見出しレベルの基準位置
-        # ぶら下げ = 番号+スペースの幅分（1行目を左に出す）
-        hanging = _HEADING_HANGING.get(level, 1)
-        set_indent(para, left_chars=left_chars, hanging_chars=hanging)
-    else:
-        # 短い小タイトル → 左インデントのみ（番号位置に揃える）、首行下げなし
-        set_indent(para, left_chars=left_chars)
+    set_indent(para, left_chars=left_chars, hanging_chars=hanging)
 
 
 def set_body_indent(para, current_heading_level):
