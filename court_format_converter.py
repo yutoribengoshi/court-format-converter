@@ -157,12 +157,13 @@ def convert_run_to_zenkaku(run):
 HEADING_PATTERNS = [
     # Level 1: 第１、第２、第１０ 等（全角・半角数字両対応）
     (1, re.compile(r'^[\s　]*第[１２３４５６７８９０\d]+[\s　]')),
-    # Level 3: (1)、(2) 等（括弧＋数字）※Level 2より先に判定
-    # スペースなしで直接テキストが続くケースにも対応
+    # Level 3: ⑴⑵（1文字版）、(1)(2)、（１）（２）等 ※Level 2より先に判定
+    (3, re.compile(r'^[\s　]*[⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇][\s　]?')),
     (3, re.compile(r'^[\s　]*[\(（][１２３４５６７８９０\d]+[\)）][\s　]?')),
     # Level 5: (ｱ)、(ｲ) 等（カタカナ括弧）
     (5, re.compile(r'^[\s　]*[\(（][ｱ-ﾝア-ン]+[\)）][\s　]?')),
-    # Level 7: (a)、(b) 等（括弧＋小文字）
+    # Level 7: ⒜⒝（1文字版）、(a)(b)、（ａ）（ｂ）等
+    (7, re.compile(r'^[\s　]*[⒜⒝⒞⒟⒠⒡⒢⒣⒤⒥⒦⒧⒨⒩⒪⒫⒬⒭⒮⒯⒰⒱⒲⒳⒴⒵][\s　]?')),
     (7, re.compile(r'^[\s　]*[\(（][a-zａ-ｚ]+[\)）][\s　]?')),
     # Level 2: １、２、１０ 等（単独の全角数字 — 「第」なし）
     (2, re.compile(r'^[\s　]*[１２３４５６７８９０\d]+[\s　]')),
@@ -213,17 +214,38 @@ def is_header_section(text):
     return False
 
 
-    # 丸数字→（全角数字）に変換するマップ
-_MARU_TO_KAKKO = {
-    '⑴': '（１）', '⑵': '（２）', '⑶': '（３）', '⑷': '（４）', '⑸': '（５）',
-    '⑹': '（６）', '⑺': '（７）', '⑻': '（８）', '⑼': '（９）', '⑽': '（１０）',
-    '⑾': '（１１）', '⑿': '（１２）', '⒀': '（１３）', '⒁': '（１４）', '⒂': '（１５）',
-    '⒃': '（１６）', '⒄': '（１７）', '⒅': '（１８）', '⒆': '（１９）', '⒇': '（２０）',
-    '①': '（１）', '②': '（２）', '③': '（３）', '④': '（４）', '⑤': '（５）',
-    '⑥': '（６）', '⑦': '（７）', '⑧': '（８）', '⑨': '（９）', '⑩': '（１０）',
-    '⑪': '（１１）', '⑫': '（１２）', '⑬': '（１３）', '⑭': '（１４）', '⑮': '（１５）',
-    '⑯': '（１６）', '⑰': '（１７）', '⑱': '（１８）', '⑲': '（１９）', '⑳': '（２０）',
+    # ⑴形式の1文字括弧付き数字（U+2474〜U+2487）
+_PAREN_DIGITS = '⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇'
+
+    # （１）→ ⑴ に統一するマップ（3文字→1文字）
+_KAKKO_TO_PAREN = {}
+for _i in range(1, 21):
+    _znum = ''.join('０１２３４５６７８９'[int(d)] for d in str(_i))
+    _KAKKO_TO_PAREN[f'（{_znum}）'] = _PAREN_DIGITS[_i - 1]
+    _KAKKO_TO_PAREN[f'({_znum})'] = _PAREN_DIGITS[_i - 1]
+    # 半角数字版も
+    _KAKKO_TO_PAREN[f'（{_i}）'] = _PAREN_DIGITS[_i - 1]
+    _KAKKO_TO_PAREN[f'({_i})'] = _PAREN_DIGITS[_i - 1]
+
+    # ①→⑴ に統一するマップ
+_MARU_TO_PAREN = {
+    '①': '⑴', '②': '⑵', '③': '⑶', '④': '⑷', '⑤': '⑸',
+    '⑥': '⑹', '⑦': '⑺', '⑧': '⑻', '⑨': '⑼', '⑩': '⑽',
+    '⑪': '⑾', '⑫': '⑿', '⑬': '⒀', '⑭': '⒁', '⑮': '⒂',
+    '⑯': '⒃', '⑰': '⒄', '⑱': '⒅', '⑲': '⒆', '⑳': '⒇',
 }
+
+    # ⒜形式の1文字括弧付き英字（U+249C〜U+24B5）
+_PAREN_ALPHA = '⒜⒝⒞⒟⒠⒡⒢⒣⒤⒥⒦⒧⒨⒩⒪⒫⒬⒭⒮⒯⒰⒱⒲⒳⒴⒵'
+
+    # （ａ）→ ⒜ に統一するマップ
+_KAKKO_ALPHA_TO_PAREN = {}
+for _i, _ch in enumerate('ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ'):
+    _KAKKO_ALPHA_TO_PAREN[f'（{_ch}）'] = _PAREN_ALPHA[_i]
+    _KAKKO_ALPHA_TO_PAREN[f'({_ch})'] = _PAREN_ALPHA[_i]
+for _i, _ch in enumerate('abcdefghijklmnopqrstuvwxyz'):
+    _KAKKO_ALPHA_TO_PAREN[f'（{_ch}）'] = _PAREN_ALPHA[_i]
+    _KAKKO_ALPHA_TO_PAREN[f'({_ch})'] = _PAREN_ALPHA[_i]
 
 
 def normalize_heading_spacing(text):
@@ -235,15 +257,42 @@ def normalize_heading_spacing(text):
     """
     ZS = '\u3000'  # 全角スペース
 
-    # まず丸数字を（全角数字）に変換
-    for maru, kakko in _MARU_TO_KAKKO.items():
-        if text.lstrip().startswith(maru):
-            leading = text[:len(text) - len(text.lstrip())]
-            rest = text.lstrip()[len(maru):]
-            text = leading + kakko + rest
+    # まず全ての括弧付き番号を1文字版に統一
+    stripped = text.lstrip()
+    leading = text[:len(text) - len(stripped)]
+
+    # ①②→⑴⑵
+    for maru, paren in _MARU_TO_PAREN.items():
+        if stripped.startswith(maru):
+            text = leading + paren + stripped[len(maru):]
+            stripped = text.lstrip()
+            leading = text[:len(text) - len(stripped)]
             break
 
-    # 括弧付き番号: （１）、（ｱ）、（a）等
+    # （１）（２）→⑴⑵（長い括弧→1文字）
+    for kakko, paren in _KAKKO_TO_PAREN.items():
+        if stripped.startswith(kakko):
+            text = leading + paren + stripped[len(kakko):]
+            stripped = text.lstrip()
+            leading = text[:len(text) - len(stripped)]
+            break
+
+    # （ａ）（ｂ）→⒜⒝
+    for kakko, paren in _KAKKO_ALPHA_TO_PAREN.items():
+        if stripped.startswith(kakko):
+            text = leading + paren + stripped[len(kakko):]
+            stripped = text.lstrip()
+            leading = text[:len(text) - len(stripped)]
+            break
+
+    # 括弧付き番号（1文字版）: ⑴⑵、⒜⒝等
+    m = re.match(r'^([\s\u3000]*[⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇])[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    m = re.match(r'^([\s\u3000]*[⒜⒝⒞⒟⒠⒡⒢⒣⒤⒥⒦⒧⒨⒩⒪⒫⒬⒭⒮⒯⒰⒱⒲⒳⒴⒵])[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    # 括弧付き番号（3文字版、残った場合のフォールバック）
     m = re.match(r'^([\s\u3000]*[\(（][１-９０-９\d]+[\)）])[\s\u3000]*(.*)', text, re.DOTALL)
     if m:
         return m.group(1) + ZS + m.group(2)
@@ -584,17 +633,32 @@ def set_heading_indent(para, level):
     set_indent(para, left_chars=left_chars)
 
 
-def set_body_indent(para, current_heading_level, has_komidashi=True):
-    """本文段落のインデント設定（直前の見出しレベルに基づく）。
-    has_komidashi=True: 直前の見出しが小タイトル付き → firstLine=1（段落冒頭字下げ）
-    has_komidashi=False: 直前の見出しが本文兼用 → firstLine=0（字下げなし）"""
-    if current_heading_level in BODY_INDENT:
-        left, fl = BODY_INDENT[current_heading_level]
-    else:
-        left, fl = 0, 1
-    if not has_komidashi:
-        fl = 0
-    set_indent(para, left_chars=left, first_line_chars=fl)
+def _heading_number_width(text):
+    """見出し番号部分の文字数を返す。「第１」=2, 「１」=1, 「⑴」=1, 「（ア）」=3。"""
+    stripped = text.strip()
+    # 1文字版: ⑴⒜
+    if stripped and stripped[0] in _PAREN_DIGITS + _PAREN_ALPHA:
+        return 1
+    # 第＋数字
+    m = re.match(r'^第[１-９０-９\d]+', stripped)
+    if m:
+        return len(m.group(0))
+    # （１）（ア）（ａ）等
+    m = re.match(r'^[\(（].+?[\)）]', stripped)
+    if m:
+        return len(m.group(0))
+    # 単独: １、ア、ａ
+    return 1
+
+
+def set_body_indent(para, current_heading_level, heading_number_width=1):
+    """本文段落のインデント設定（直前の見出しレベルと番号幅に基づく）。
+    heading_number_width: 直前の見出し番号の文字数（⑴=1, （ア）=3）。
+    本文は 見出しleft + 番号幅 + 全角スペース1 の位置から開始。"""
+    heading_left = HEADING_LEVELS.get(current_heading_level, (0, ''))[0]
+    # 本文の左位置 = 見出しのleft + 番号の文字数 + 全角スペース1個
+    body_left = heading_left + heading_number_width + 1
+    set_indent(para, left_chars=body_left, first_line_chars=1)
 
 
 # ============================================================
@@ -1565,6 +1629,7 @@ def convert(input_path, output_path=None):
 
     # 5. テキストを流し込み
     current_heading_level = 0
+    current_number_width = 1
     in_header_section = True
 
     for elem in elements:
@@ -1633,6 +1698,9 @@ def convert(input_path, output_path=None):
                 normalized = normalize_heading_spacing(text)
                 if normalized != text:
                     para.runs[0].text = normalized
+                    text = normalized
+                # 番号の文字数を記録
+                current_number_width = _heading_number_width(text)
                 if not skip_indent:
                     set_heading_indent(para, level)
                 para.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -1643,7 +1711,7 @@ def convert(input_path, output_path=None):
                         set_indent(para)
                 else:
                     if not skip_indent:
-                        set_body_indent(para, current_heading_level)
+                        set_body_indent(para, current_heading_level, current_number_width)
                     para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     # 6. ページ番号
