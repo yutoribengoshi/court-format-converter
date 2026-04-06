@@ -24,7 +24,7 @@ import os
 import datetime
 from docx import Document
 from docx.shared import Pt, Mm, Cm, Twips
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn, nsdecls
 from docx.oxml import parse_xml
 
@@ -431,6 +431,53 @@ def set_paragraph_font(para, size=12):
         set_run_font(run, size)
 
 
+def _is_on_off_true(value):
+    """WordprocessingML の on/off 値を真偽値に変換。"""
+    return value is None or value.lower() in ('1', 'true', 'on')
+
+
+def _is_fully_bold(paragraph_element):
+    """段落内のテキストrunがすべて太字なら True。"""
+    saw_text = False
+
+    for run in paragraph_element.findall(qn('w:r')):
+        text_nodes = run.findall(qn('w:t'))
+        if not any(node.text for node in text_nodes):
+            continue
+
+        saw_text = True
+        rpr = run.find(qn('w:rPr'))
+        if rpr is None:
+            return False
+
+        bold = rpr.find(qn('w:b'))
+        if bold is None or not _is_on_off_true(bold.get(qn('w:val'))):
+            return False
+
+    return saw_text
+
+
+def apply_paragraph_layout(para, fmt):
+    """元段落の余白・行間・太字を復元する。"""
+    if not fmt:
+        return
+
+    pf = para.paragraph_format
+
+    if fmt.get('space_before') is not None:
+        pf.space_before = Twips(int(fmt['space_before']))
+    if fmt.get('space_after') is not None:
+        pf.space_after = Twips(int(fmt['space_after']))
+    if fmt.get('line') is not None:
+        pf.line_spacing = Twips(int(fmt['line']))
+    if fmt.get('line_rule') == 'exact':
+        pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+
+    if fmt.get('bold'):
+        for run in para.runs:
+            run.bold = True
+
+
 # ============================================================
 # インデント設定
 # ============================================================
@@ -597,13 +644,24 @@ def add_page_number(doc):
         )
         run2._element.append(instr)
 
-        # END field
+        # 現在値を表示するため、separate + result を含む正規のフィールド構造にする。
         run3 = fp.add_run()
         set_run_font(run3, size=10)
+        fld_sep = parse_xml(
+            f'<w:fldChar {nsdecls("w")} w:fldCharType="separate"/>'
+        )
+        run3._element.append(fld_sep)
+
+        run4 = fp.add_run('1')
+        set_run_font(run4, size=10)
+
+        # END field
+        run5 = fp.add_run()
+        set_run_font(run5, size=10)
         fld_end = parse_xml(
             f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>'
         )
-        run3._element.append(fld_end)
+        run5._element.append(fld_end)
 
 
 # ============================================================
@@ -1385,7 +1443,13 @@ def convert_with_structure(input_path, structure_json_path, output_path=None):
 
 def _extract_paragraphs_and_tables(input_path):
     """元のdocxからテキストとテーブルデータを抽出する。
-    Returns: list of dict {type: 'para'|'table', text: str, alignment: str|None, rows: list|None}
+    Returns: list of dict {
+        type: 'para'|'table',
+        text: str,
+        alignment: str|None,
+        fmt: dict|None,
+        rows: list|None,
+    }
     段落とテーブルの出現順序を保持する。"""
     src = Document(input_path)
     elements = []
@@ -1400,11 +1464,32 @@ def _extract_paragraphs_and_tables(input_path):
             # 配置を取得
             pPr = child.find(qn('w:pPr'))
             alignment = None
+            spacing_before = None
+            spacing_after = None
+            line = None
+            line_rule = None
             if pPr is not None:
                 jc = pPr.find(qn('w:jc'))
                 if jc is not None:
                     alignment = jc.get(qn('w:val'))
-            elements.append({'type': 'para', 'text': text, 'alignment': alignment})
+                spacing = pPr.find(qn('w:spacing'))
+                if spacing is not None:
+                    spacing_before = spacing.get(qn('w:before'))
+                    spacing_after = spacing.get(qn('w:after'))
+                    line = spacing.get(qn('w:line'))
+                    line_rule = spacing.get(qn('w:lineRule'))
+            elements.append({
+                'type': 'para',
+                'text': text,
+                'alignment': alignment,
+                'fmt': {
+                    'space_before': spacing_before,
+                    'space_after': spacing_after,
+                    'line': line,
+                    'line_rule': line_rule,
+                    'bold': _is_fully_bold(child),
+                },
+            })
         elif tag == 'tbl':
             # テーブル: セルのテキストを抽出
             rows = []
@@ -1490,12 +1575,22 @@ def convert(input_path, output_path=None):
 
         # 空段落
         if not text:
-            doc.add_paragraph('')
+            para = doc.add_paragraph('')
+            apply_paragraph_layout(para, elem.get('fmt'))
+            if elem.get('alignment') == 'right':
+                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            elif elem.get('alignment') == 'center':
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             continue
 
         # 段落を追加
         para = doc.add_paragraph(text)
         set_paragraph_font(para, size=12)
+        apply_paragraph_layout(para, elem.get('fmt'))
+        if elem.get('alignment') == 'right':
+            para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        elif elem.get('alignment') == 'center':
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         # 冒頭セクション判定
         if in_header_section:
