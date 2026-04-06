@@ -539,7 +539,7 @@ def _set_outline_level(para, level):
     # 全レベル共通: FirstLineIndent = -12pt = -1字
     # 第１だけ例外: FirstLineIndent = -24pt = -2字
 _HEADING_HANGING = {
-    1: 2,    # 第１ → 2字ぶら下げ（left2字-hang2字=0字目から）
+    1: 1,    # 第１ → 1字ぶら下げ（left2字-hang1字=1字目から。１と頭揃え）
     2: 1,    # １　 → 1字ぶら下げ（left2字-hang1字=1字目から）
     3: 1,    # (1)  → 1字ぶら下げ（left3字-hang1字=2字目から）
     4: 1,    # ア　 → 1字ぶら下げ（left4字-hang1字=3字目から）
