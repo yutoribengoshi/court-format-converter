@@ -627,10 +627,30 @@ _HEADING_HANGING = {
 
 def set_heading_indent(para, level):
     """見出し段落のインデント＋アウトラインレベル設定。
-    leftのみで位置指定。ぶら下げは使わない（Wordの文字幅計算でずれるため）。"""
+    コミ出しなし（本文兼用）の場合は firstLine=1 で
+    折り返し2行目を番号＋スペースの直後に揃える。"""
     left_chars = HEADING_LEVELS[level][0]
     _set_outline_level(para, level)
-    set_indent(para, left_chars=left_chars)
+
+    # 番号を除いた本文部分の長さで判定
+    text = para.text.strip()
+    body = re.sub(
+        r'^[\s\u3000]*(第[１-９０-９\d]+|[１-９０-９\d]+|'
+        r'[⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇]|'
+        r'[\(（][１-９０-９\d]+[\)）]|'
+        r'[ア-ン]|[\(（][ｱ-ﾝア-ン]+[\)）]|'
+        r'[ａ-ｚ]|[⒜⒝⒞⒟⒠⒡⒢⒣⒤⒥⒦⒧⒨⒩⒪⒫⒬⒭⒮⒯⒰⒱⒲⒳⒴⒵]|'
+        r'[\(（][a-zａ-ｚ]+[\)）])[\s\u3000]*',
+        '', text)
+
+    if len(body) > 20:
+        # コミ出しなし（本文兼用）→ 折り返し2行目は本文と同じルール
+        number_width = _heading_number_width(text)
+        body_start = left_chars + number_width + 1
+        set_indent(para, left_chars=body_start - 1, first_line_chars=1)
+    else:
+        # コミ出しあり（短い小タイトル）→ leftのみ
+        set_indent(para, left_chars=left_chars)
 
 
 def _heading_number_width(text):
@@ -657,8 +677,10 @@ def set_body_indent(para, current_heading_level, heading_number_width=1):
     本文は 見出しleft + 番号幅 + 全角スペース1 の位置から開始。
     firstLine=0（段落冒頭の字下げなし）。"""
     heading_left = HEADING_LEVELS.get(current_heading_level, (0, ''))[0]
-    body_left = heading_left + heading_number_width + 1
-    set_indent(para, left_chars=body_left)
+    body_start = heading_left + heading_number_width + 1
+    # 1行目: body_start
+    # 2行目以降: body_start - 1（全角1字左）
+    set_indent(para, left_chars=body_start - 1, first_line_chars=1)
 
 
 # ============================================================
