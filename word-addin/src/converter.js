@@ -780,6 +780,19 @@ async function applyFooterPageNumbers(context) {
   }
 
   await context.sync();
+
+  // insertOoxmlの後に明示的に中央揃えを設定
+  for (const section of sections.items) {
+    const footer = section.getFooter(Word.HeaderFooterType.primary);
+    const paras = footer.paragraphs;
+    paras.load('items');
+    await context.sync();
+    for (const p of paras.items) {
+      p.alignment = Word.Alignment.centered;
+    }
+  }
+
+  await context.sync();
 }
 
 // ============================================================
