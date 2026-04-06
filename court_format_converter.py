@@ -1345,6 +1345,7 @@ def _apply_structure_to_doc(doc, structure, add_comments=False):
 
     level_map = {'H1': 1, 'H2': 2, 'H3': 3, 'H4': 4, 'H5': 5, 'H6': 6, 'H7': 7}
     current_heading_level = 0
+    current_number_width = 1
     comment_count = 0
 
     # structureから空SKIP行を除いて、doc非空段落と1:1対応させるマップを構築
@@ -1388,6 +1389,7 @@ def _apply_structure_to_doc(doc, structure, add_comments=False):
                         run.text = new_text
                     else:
                         run.text = ''
+            current_number_width = _heading_number_width(para.text)
             set_heading_indent(para, level)
             para.alignment = WD_ALIGN_PARAGRAPH.LEFT
         else:
@@ -1401,7 +1403,7 @@ def _apply_structure_to_doc(doc, structure, add_comments=False):
                 )
                 comment_count += 1
 
-            set_body_indent(para, current_heading_level)
+            set_body_indent(para, current_heading_level, current_number_width)
             if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
                 para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
