@@ -177,6 +177,16 @@ HEADING_PATTERNS = [
 # ただし「以上」「記」などの定型句は除外
 SKIP_PATTERNS = re.compile(r'^[\s　]*(以上|記|別紙|添付|目録)[\s　]*$')
 
+# 書面タイトルの判定パターン（16pt太字・中央揃えにする）
+TITLE_PATTERN = re.compile(
+    r'^[\s　]*(準備書面|訴状|答弁書|意見書|報告書|申立書|陳述書|上申書|'
+    r'申請書|請求書|通知書|催告書|告訴状|告発状|嘆願書|'
+    r'抗告理由書|控訴理由書|上告理由書|弁論要旨|'
+    r'証拠保全請求書|接見禁止.{0,4}申請書|押収物還付請求書|'
+    r'勾留.{0,6}請求書|保釈請求書|判決|決定|命令)'
+    r'[\s　（(]*'
+)
+
 # 冒頭部分（事件番号、当事者名、表題、日付、弁護士名等）を判定
 HEADER_PATTERNS = [
     re.compile(r'(原告|被告|申立人|被申立人|相手方|抗告人|債権者|債務者)'),
@@ -1703,8 +1713,13 @@ def convert(input_path, output_path=None):
             if level is not None:
                 in_header_section = False
             elif is_header_section(text):
-                # 冒頭セクション: 元の配置を維持
-                if elem.get('alignment') == 'right':
+                # タイトル行: 16pt太字・中央揃え
+                if TITLE_PATTERN.match(text):
+                    set_paragraph_font(para, size=16)
+                    for run in para.runs:
+                        run.bold = True
+                    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                elif elem.get('alignment') == 'right':
                     para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 elif elem.get('alignment') == 'center':
                     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
