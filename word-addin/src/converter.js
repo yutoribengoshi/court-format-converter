@@ -103,9 +103,9 @@ function toZenkaku(text) {
 
 const HEADING_PATTERNS = [
   { level: 1, re: /^[\s\u3000]*第[１２３４５６７８９０\d]+[\s\u3000]/ },
-  { level: 3, re: /^[\s\u3000]*[(\uff08][１２３４５６７８９０\d]+[)\uff09][\s\u3000]/ },
-  { level: 5, re: /^[\s\u3000]*[(\uff08][ｱ-ﾝア-ン]+[)\uff09][\s\u3000]/ },
-  { level: 7, re: /^[\s\u3000]*[(\uff08][a-zａ-ｚ]+[)\uff09][\s\u3000]/ },
+  { level: 3, re: /^[\s\u3000]*[(\uff08][１２３４５６７８９０\d]+[)\uff09][\s\u3000]?/ },
+  { level: 5, re: /^[\s\u3000]*[(\uff08][ｱ-ﾝア-ン]+[)\uff09][\s\u3000]?/ },
+  { level: 7, re: /^[\s\u3000]*[(\uff08][a-zａ-ｚ]+[)\uff09][\s\u3000]?/ },
   { level: 2, re: /^[\s\u3000]*[１２３４５６７８９０\d]+[\s\u3000]/ },
   { level: 4, re: /^[\s\u3000]*[ア-ン][\u3000\s]/ },
   { level: 6, re: /^[\s\u3000]*[ａ-ｚ][\u3000\s]/ },
@@ -124,6 +124,27 @@ const HEADER_PATTERNS = [
 ];
 
 const HEADING_STRIP_RE = /^[\s\u3000]*(?:第[１２３４５６７８９０\d]+|[\(（][１２３４５６７８９０\d]+[\)）]|[\(（][ｱ-ﾝア-ン]+[\)）]|[\(（][a-zａ-ｚ]+[\)）]|[１２３４５６７８９０\d]+|[ア-ン]|[ａ-ｚ])[\s\u3000]*/;
+
+function normalizeHeadingSpacing(text) {
+  // 見出し番号の後のスペースを全角スペース1個に正規化
+  const ZS = '\u3000';
+  const patterns = [
+    /^([\s\u3000]*[(\uff08][１２３４５６７８９０\d]+[)\uff09])[\s\u3000]*(.*)/s,
+    /^([\s\u3000]*[(\uff08][ｱ-ﾝア-ン]+[)\uff09])[\s\u3000]*(.*)/s,
+    /^([\s\u3000]*[(\uff08][a-zａ-ｚ]+[)\uff09])[\s\u3000]*(.*)/s,
+    /^([\s\u3000]*第[１２３４５６７８９０\d]+)[\s\u3000]*(.*)/s,
+    /^([\s\u3000]*[１２３４５６７８９０\d]+)[\s\u3000]*(.*)/s,
+    /^([\s\u3000]*[ア-ン])[\s\u3000]*(.*)/s,
+    /^([\s\u3000]*[ａ-ｚ])[\s\u3000]*(.*)/s,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) {
+      return m[1] + ZS + m[2];
+    }
+  }
+  return text;
+}
 
 function detectHeadingLevel(text) {
   const stripped = text.trim();
@@ -462,12 +483,32 @@ function setParagraphIndent(paragraph, { leftTwips = 0, hangingTwips = 0, firstL
   ensureParagraphProperties(paragraph).appendChild(indentNode);
 }
 
-function setHeadingIndent(paragraph, level) {
-  const [titleStart, numberHang] = HEADING_LEVELS[level];
-  setParagraphIndent(paragraph, {
-    leftTwips: titleStart,
-    hangingTwips: numberHang,
-  });
+function setHeadingIndent(paragraph, level, text) {
+  // 番号部分を除いた本文の長さで小タイトル vs 本文兼用を判定
+  const body = (text || '').replace(HEADING_STRIP_RE, '').trim();
+
+  if (body.length > 20) {
+    // 本文兼用 → ぶら下げインデント
+    // 1行目は番号から始まる（左に出る）、2行目以降は左インデント位置に揃う
+    const [titleStart, numberHang] = HEADING_LEVELS[level];
+    if (level === 1) {
+      setParagraphIndent(paragraph, { leftTwips: titleStart, hangingTwips: numberHang });
+    } else {
+      const leftChars = { 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7 }[level] || 2;
+      const hangChars = [3, 5, 7].includes(level) ? 3 : 1; // 括弧付き=3字、単独=1字
+      setParagraphIndent(paragraph, {
+        leftTwips: leftChars * _F,
+        hangingTwips: hangChars * _F,
+      });
+    }
+  } else {
+    // 短い小タイトル → 左インデント0、首行1字下げ
+    if (level === 1) {
+      setParagraphIndent(paragraph, { leftTwips: 0 });
+    } else {
+      setParagraphIndent(paragraph, { leftTwips: 0, firstLineTwips: _F });
+    }
+  }
 }
 
 function setBodyIndent(paragraph, currentHeadingLevel) {
@@ -639,13 +680,15 @@ function transformBodyOoxml(ooxml, options) {
         const adjusted = remap(level, levelOffset);
         currentHeadingLevel = adjusted;
         const bodyText = stripNum(text);
-        const newText = genNum(adjusted, counter.inc(adjusted)) + bodyText;
+        let newText = genNum(adjusted, counter.inc(adjusted)) + bodyText;
+        // 番号後のスペースを全角1個に正規化
+        newText = normalizeHeadingSpacing(newText);
         if (newText !== text) {
           setParagraphText(paragraph, newText);
           text = newText;
         }
 
-        setHeadingIndent(paragraph, adjusted);
+        setHeadingIndent(paragraph, adjusted, text);
         setParagraphAlignment(paragraph, 'left');
       } else if (SKIP_PATTERN.test(trimmed)) {
         setParagraphAlignment(paragraph, 'right');

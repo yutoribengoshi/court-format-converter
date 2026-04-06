@@ -201,6 +201,43 @@ def is_header_section(text):
     return False
 
 
+def normalize_heading_spacing(text):
+    """見出し番号の後のスペースを全角スペース1個に正規化する。
+    「（１）被疑者」→「（１）　被疑者」
+    「（１）　　被疑者」→「（１）　被疑者」
+    「１被告」→「１　被告」
+    """
+    ZS = '\u3000'  # 全角スペース
+
+    # 括弧付き番号: （１）、（ｱ）、（a）等
+    m = re.match(r'^([\s\u3000]*[\(（][１-９０-９\d]+[\)）])[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    m = re.match(r'^([\s\u3000]*[\(（][ｱ-ﾝア-ン]+[\)）])[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    m = re.match(r'^([\s\u3000]*[\(（][a-zａ-ｚ]+[\)）])[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    # 「第１」
+    m = re.match(r'^([\s\u3000]*第[１-９０-９\d]+)[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    # 単独数字: 「１」「２」等
+    m = re.match(r'^([\s\u3000]*[１-９０-９\d]+)[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    # 単独カタカナ: 「ア」「イ」等
+    m = re.match(r'^([\s\u3000]*[ア-ン])[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    # 単独英字: 「ａ」「ｂ」等
+    m = re.match(r'^([\s\u3000]*[ａ-ｚ])[\s\u3000]*(.*)', text, re.DOTALL)
+    if m:
+        return m.group(1) + ZS + m.group(2)
+    return text
+
+
 # ============================================================
 # Wordコメント機能
 # ============================================================
@@ -413,17 +450,30 @@ def set_indent(para, left_chars=0, first_line_chars=0, hanging_chars=0):
 
     ind = parse_xml(f'<w:ind {nsdecls("w")}/>')
 
+    # 文字単位（Chars）のみ設定。twips直値はWordがグリッド設定に基づき自動計算する。
+    # twips直値を明示するとグリッド変更時にずれるため、Chars属性のみが正しい。
     if left_chars > 0:
-        ind.set(qn('w:leftChars'), str(left_chars * 100))
-        ind.set(qn('w:left'), str(left_chars * CHAR_TWIPS))
+        ind.set(qn('w:leftChars'), str(int(left_chars * 100)))
     if hanging_chars > 0:
-        ind.set(qn('w:hangingChars'), str(hanging_chars * 100))
-        ind.set(qn('w:hanging'), str(hanging_chars * CHAR_TWIPS))
+        ind.set(qn('w:hangingChars'), str(int(hanging_chars * 100)))
     elif first_line_chars > 0:
-        ind.set(qn('w:firstLineChars'), str(first_line_chars * 100))
-        ind.set(qn('w:firstLine'), str(first_line_chars * CHAR_TWIPS))
+        ind.set(qn('w:firstLineChars'), str(int(first_line_chars * 100)))
 
     pPr.append(ind)
+
+
+
+
+def _set_outline_level(para, level):
+    """段落にアウトラインレベルを設定（目次生成用）。
+    見た目は変えずに、Wordの目次挿入機能で認識される。"""
+    pPr = para._element.get_or_add_pPr()
+    existing = pPr.find(qn('w:outlineLvl'))
+    if existing is not None:
+        pPr.remove(existing)
+    # outlineLvl: 0=Level1, 1=Level2, ... 8=本文
+    olvl = parse_xml(f'<w:outlineLvl {nsdecls("w")} w:val="{level - 1}"/>')
+    pPr.append(olvl)
 
 
     # 見出しレベルごとのぶら下げ幅（番号+スペース分、全角文字単位）
@@ -446,10 +496,12 @@ _HEADING_HANGING = {
 
 
 def set_heading_indent(para, level):
-    """見出し段落のインデント設定。
-    短い小タイトル: 首行1字下げ（左インデント0）
-    本文兼用（長い）: ぶら下げインデント（2行目以降が番号位置に揃う）"""
+    """見出し段落のインデント＋アウトラインレベル設定。
+    短い小タイトル: インデントなし
+    本文兼用（長い）: ぶら下げインデント（2行目以降が番号位置に揃う）
+    アウトラインレベルにより、Wordの目次挿入で自動認識される。"""
     left_chars = HEADING_LEVELS[level][0]
+    _set_outline_level(para, level)
 
     # 番号部分を除いた本文の長さで判定
     text = para.text.strip()
@@ -469,11 +521,8 @@ def set_heading_indent(para, level):
         else:
             set_indent(para, left_chars=left_chars, hanging_chars=hanging)
     else:
-        # 短い小タイトル → 左インデント0、首行1字下げ
-        if level == 1:
-            set_indent(para, left_chars=0)
-        else:
-            set_indent(para, left_chars=0, first_line_chars=1)
+        # 短い小タイトル → インデントなし（番号自体が区切り）
+        set_indent(para)
 
 
 def set_body_indent(para, current_heading_level):
@@ -1334,80 +1383,162 @@ def convert_with_structure(input_path, structure_json_path, output_path=None):
 # メイン変換処理
 # ============================================================
 
+def _extract_paragraphs_and_tables(input_path):
+    """元のdocxからテキストとテーブルデータを抽出する。
+    Returns: list of dict {type: 'para'|'table', text: str, alignment: str|None, rows: list|None}
+    段落とテーブルの出現順序を保持する。"""
+    src = Document(input_path)
+    elements = []
+
+    # docx内部ではw:bodyの直下にw:pとw:tblが混在している
+    body = src.element.body
+    for child in body:
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag == 'p':
+            # 段落
+            text = ''.join(node.text or '' for node in child.iter(qn('w:t')))
+            # 配置を取得
+            pPr = child.find(qn('w:pPr'))
+            alignment = None
+            if pPr is not None:
+                jc = pPr.find(qn('w:jc'))
+                if jc is not None:
+                    alignment = jc.get(qn('w:val'))
+            elements.append({'type': 'para', 'text': text, 'alignment': alignment})
+        elif tag == 'tbl':
+            # テーブル: セルのテキストを抽出
+            rows = []
+            for tr in child.findall(qn('w:tr')):
+                cells = []
+                for tc in tr.findall(qn('w:tc')):
+                    cell_text = ''.join(
+                        node.text or '' for node in tc.iter(qn('w:t'))
+                    )
+                    cells.append(cell_text)
+                rows.append(cells)
+            elements.append({'type': 'table', 'rows': rows})
+
+    return elements
+
+
+# 岡口マクロが設定するスタイル名。これらが検出されたらインデント処理をスキップ。
+OKAGUCHI_STYLES = re.compile(r'^(ランク[１-９1-9]|本文[１-９1-9]|標準\(太郎文書スタイル\))')
+
+
+def _has_okaguchi_styles(input_path):
+    """元の文書に岡口マクロのスタイルが使われているか判定。"""
+    doc = Document(input_path)
+    for para in doc.paragraphs:
+        if para.style and OKAGUCHI_STYLES.match(para.style.name):
+            return True
+    return False
+
+
 def convert(input_path, output_path=None):
-    """docxファイルを裁判所書式に変換。"""
+    """docxファイルを裁判所書式に変換。
+    新規docxを作成してテキストを流し込む方式。元のスタイル・グリッドに依存しない。
+    岡口マクロのスタイルが検出されたらインデント処理をスキップ。"""
 
     if output_path is None:
         base, ext = os.path.splitext(input_path)
         output_path = f"{base}_裁判所書式{ext}"
 
-    doc = Document(input_path)
+    # 0. 岡口マクロ検出
+    skip_indent = _has_okaguchi_styles(input_path)
+    if skip_indent:
+        print("注意: 岡口マクロのスタイルが検出されました。インデント処理をスキップします。")
 
-    # 1. ページ設定
+    # 1. 元のdocxからテキスト・テーブルを抽出
+    elements = _extract_paragraphs_and_tables(input_path)
+
+    # 2. 新規docxを作成
+    doc = Document()
+
+    # 3. ページ設定・デフォルトスタイル
     setup_page(doc)
-
-    # 2. デフォルトスタイル
     setup_default_style(doc)
 
-    # 3. 段落処理（半角→全角変換 + フォント + インデント）
+    # 4. 最初の空段落を削除（Documentが自動生成する）
+    if doc.paragraphs:
+        doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
+
+    # 5. テキストを流し込み
     current_heading_level = 0
-    in_header_section = True  # 冒頭セクションフラグ
+    in_header_section = True
 
-    for para in doc.paragraphs:
-        # 半角→全角変換（フォント設定より先に実行）
-        for run in para.runs:
-            convert_run_to_zenkaku(run)
-
-        text = para.text.strip()
-
-        # フォント統一
-        set_paragraph_font(para, size=12)
-
-        # 空段落はスキップ
-        if not text:
+    for elem in elements:
+        if elem['type'] == 'table':
+            # テーブルを追加
+            rows = elem['rows']
+            if not rows:
+                continue
+            max_cols = max(len(r) for r in rows)
+            table = doc.add_table(rows=len(rows), cols=max_cols)
+            for ri, row_data in enumerate(rows):
+                for ci, cell_text in enumerate(row_data):
+                    if ci < max_cols:
+                        cell = table.cell(ri, ci)
+                        cell.text = to_zenkaku(cell_text)
+                        for p in cell.paragraphs:
+                            set_paragraph_font(p, size=12)
+            format_tables(doc)
             continue
 
-        # 冒頭セクション判定（最初の見出しが出るまで）
+        # 段落
+        raw_text = elem['text']
+        text = to_zenkaku(raw_text).strip()
+
+        # 空段落
+        if not text:
+            doc.add_paragraph('')
+            continue
+
+        # 段落を追加
+        para = doc.add_paragraph(text)
+        set_paragraph_font(para, size=12)
+
+        # 冒頭セクション判定
         if in_header_section:
             level = detect_heading_level(text)
             if level is not None:
                 in_header_section = False
-                # 見出しとして処理（下に続く）
             elif is_header_section(text):
-                # 冒頭セクション → インデントはそのまま（右寄せ等維持）
+                # 冒頭セクション: 元の配置を維持
+                if elem.get('alignment') == 'right':
+                    para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                elif elem.get('alignment') == 'center':
+                    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 continue
             else:
-                # 冒頭でも見出しでもない → 一応チェック
                 continue
 
-        # 見出し判定
+        # 見出し・本文判定
         if not in_header_section:
             level = detect_heading_level(text)
 
             if level is not None:
                 current_heading_level = level
-                set_heading_indent(para, level)
-                # 見出し段落の配置をリセット（中央寄せ等を解除）
+                # 番号後のスペースを全角1個に正規化
+                normalized = normalize_heading_spacing(text)
+                if normalized != text:
+                    para.runs[0].text = normalized
+                if not skip_indent:
+                    set_heading_indent(para, level)
                 para.alignment = WD_ALIGN_PARAGRAPH.LEFT
             else:
-                # 本文段落
                 if SKIP_PATTERNS.match(text):
-                    # 「以上」等は右寄せ
                     para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    set_indent(para)
+                    if not skip_indent:
+                        set_indent(para)
                 else:
-                    set_body_indent(para, current_heading_level)
-                    # 本文の配置をリセット
-                    if para.alignment == WD_ALIGN_PARAGRAPH.CENTER:
-                        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    if not skip_indent:
+                        set_body_indent(para, current_heading_level)
+                    para.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-    # 4. テーブル処理
-    format_tables(doc)
-
-    # 5. ページ番号
+    # 6. ページ番号
     add_page_number(doc)
 
-    # 6. 保存
+    # 7. 保存
     doc.save(output_path)
     return output_path
 
