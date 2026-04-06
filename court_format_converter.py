@@ -654,11 +654,11 @@ def _heading_number_width(text):
 def set_body_indent(para, current_heading_level, heading_number_width=1):
     """本文段落のインデント設定（直前の見出しレベルと番号幅に基づく）。
     heading_number_width: 直前の見出し番号の文字数（⑴=1, （ア）=3）。
-    本文は 見出しleft + 番号幅 + 全角スペース1 の位置から開始。"""
+    本文は 見出しleft + 番号幅 + 全角スペース1 の位置から開始。
+    firstLine=0（段落冒頭の字下げなし）。"""
     heading_left = HEADING_LEVELS.get(current_heading_level, (0, ''))[0]
-    # 本文の左位置 = 見出しのleft + 番号の文字数 + 全角スペース1個
     body_left = heading_left + heading_number_width + 1
-    set_indent(para, left_chars=body_left, first_line_chars=1)
+    set_indent(para, left_chars=body_left)
 
 
 # ============================================================
