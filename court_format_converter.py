@@ -37,10 +37,10 @@ from docx.oxml import parse_xml
 CHAR_TWIPS = 245
 
 # 見出しレベルごとの設定: (left_chars, 番号説明)
-# 「第１」の「１」と単独の「１」が縦に揃う配置
+# 岡口マクロ実測値: ランク１=left:490(2字), 本文１=left:490+firstLine:245
 HEADING_LEVELS = {
-    1: (0, "第１"),    # 第１ … （左端。第=0字目、１=1字目）
-    2: (1, "１"),      # １ …   （左1字。第１の１と縦揃え）
+    1: (2, "第１"),    # 第１ … （左2字。岡口マクロ: ランク１=left:490）
+    2: (2, "１"),      # １ …   （左2字。第１の１と同じ位置）
     3: (3, "(1)"),     # (1) …
     4: (4, "ア"),      # ア …
     5: (5, "(ｱ)"),     # (ｱ) …
@@ -48,11 +48,12 @@ HEADING_LEVELS = {
     7: (7, "(a)"),     # (a) …
 }
 
-# 本文インデント: 見出し番号の右端位置 + 首行1字下げ
+# 本文インデント: 対応するランクと同じ左位置 + 首行1字下げ
+# 岡口マクロ実測値: 本文１=left:490(2字)+firstLine:245(1字)
 BODY_INDENT = {
     0: (0, 1),   # 見出しなし直後 → 首行1字のみ
-    1: (1, 1),   # 第１直下 → 左1字 + 首行1字（「第１　」の後）
-    2: (1, 1),   # １直下 → 左1字 + 首行1字（「１　」の後、第１直下と同じ）
+    1: (2, 1),   # 第１直下 → 左2字 + 首行1字
+    2: (2, 1),   # １直下 → 左2字 + 首行1字
     3: (3, 1),   # (1)直下 → 左3字 + 首行1字
     4: (4, 1),   # ア直下 → 左4字 + 首行1字
     5: (5, 1),   # (ｱ)直下 → 左5字 + 首行1字
@@ -498,14 +499,17 @@ def set_indent(para, left_chars=0, first_line_chars=0, hanging_chars=0):
 
     ind = parse_xml(f'<w:ind {nsdecls("w")}/>')
 
-    # 文字単位（Chars）のみ設定。twips直値はWordがグリッド設定に基づき自動計算する。
-    # twips直値を明示するとグリッド変更時にずれるため、Chars属性のみが正しい。
+    # Chars属性とtwips直値の両方を設定。
+    # Chars属性が主、twipsはフォールバック（岡口マクロと同じ方式）。
     if left_chars > 0:
         ind.set(qn('w:leftChars'), str(int(left_chars * 100)))
+        ind.set(qn('w:left'), str(int(left_chars * CHAR_TWIPS)))
     if hanging_chars > 0:
         ind.set(qn('w:hangingChars'), str(int(hanging_chars * 100)))
+        ind.set(qn('w:hanging'), str(int(hanging_chars * CHAR_TWIPS)))
     elif first_line_chars > 0:
         ind.set(qn('w:firstLineChars'), str(int(first_line_chars * 100)))
+        ind.set(qn('w:firstLine'), str(int(first_line_chars * CHAR_TWIPS)))
 
     pPr.append(ind)
 
