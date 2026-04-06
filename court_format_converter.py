@@ -55,17 +55,17 @@ HEADING_LEVELS = {
     7: (7, "(a)"),     # left=7字
 }
 
-# 本文インデント: 番号＋全角スペースの直後から本文開始。
-# 番号の下には文字が来ない。1行目も2行目も同じ位置（firstLine=0）。
+# 本文インデント: 全角1字刻み。半角（0.5字）は使わない。
+# (left_chars, first_line_chars)
 BODY_INDENT = {
-    0: (0, 1),   # 見出しなし直後 → 首行1字のみ
-    1: (3, 0),   # 第１直下 → 3字目から
-    2: (3, 0),   # １直下 → 3字目から
-    3: (6, 0),   # (1)直下 → 6字目から
-    4: (5, 0),   # ア直下 → 5字目から
-    5: (8, 0),   # (ｱ)直下 → 8字目から
-    6: (7, 0),   # ａ直下 → 7字目から
-    7: (10, 0),  # (a)直下 → 10字目から
+    0: (0, 1),   # 表紙・導入 → 首行1字のみ
+    1: (2, 1),   # ランク1本文 → 左2字 + 首行1字 → 3字目
+    2: (3, 0),   # ランク2本文 → 左3字 → 3字目（ランク1本文と同じ開始位置）
+    3: (3, 0),   # ランク3本文 → 左3字 → 3字目
+    4: (4, 0),   # ランク4本文 → 左4字 → 4字目
+    5: (5, 0),   # ランク5本文 → 左5字 → 5字目
+    6: (6, 0),   # ランク6本文 → 左6字 → 6字目
+    7: (7, 0),   # ランク7本文 → 左7字 → 7字目
 }
 
 
@@ -559,12 +559,16 @@ def set_heading_indent(para, level):
     set_indent(para, left_chars=left_chars, hanging_chars=hanging)
 
 
-def set_body_indent(para, current_heading_level):
-    """本文段落のインデント設定（直前の見出しレベルに基づく）。"""
+def set_body_indent(para, current_heading_level, has_komidashi=True):
+    """本文段落のインデント設定（直前の見出しレベルに基づく）。
+    has_komidashi=True: 直前の見出しが小タイトル付き → firstLine=1（段落冒頭字下げ）
+    has_komidashi=False: 直前の見出しが本文兼用 → firstLine=0（字下げなし）"""
     if current_heading_level in BODY_INDENT:
         left, fl = BODY_INDENT[current_heading_level]
     else:
         left, fl = 0, 1
+    if not has_komidashi:
+        fl = 0
     set_indent(para, left_chars=left, first_line_chars=fl)
 
 
