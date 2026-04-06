@@ -27,39 +27,44 @@ const XML_NS = 'http://www.w3.org/XML/1998/namespace';
 // 1全角文字幅 (twips)
 const _F = 242; // full-width char
 
+// 1全角文字幅 (twips)
+// const _F = 242; // already defined above
+
 // 見出しレベルごとの左インデント (chars単位)
-// 「第１」の「１」と単独の「１」が縦に揃う配置
+// 岡口マクロVBAソース準拠: https://www.slaw.jp/2015/08/ms-wordvba.html
 const HEADING_LEFT_CHARS = {
-  1: 0,  // 第１ — 左端（第=0字目、１=1字目）
-  2: 1,  // １   — 左1字（第１の１と縦揃え）
-  3: 3,  // (1)
-  4: 4,  // ア
-  5: 5,  // (ｱ)
-  6: 6,  // ａ
-  7: 7,  // (a)
+  1: 2,  // 第１ — left=24pt(2字)
+  2: 2,  // １   — left=24pt(2字)
+  3: 3,  // (1)  — left=36pt(3字)
+  4: 4,  // ア   — left=48pt(4字)
+  5: 5,  // (ｱ)  — left=60pt(5字)
+  6: 6,  // ａ   — left=72pt(6字)
+  7: 7,  // (a)  — left=84pt(7字)
 };
 
-// ぶら下げ幅 (chars単位、本文兼用の長い見出し用)
+// ぶら下げ幅 (chars単位)
+// 全レベル1字、第１だけ2字（VBAソース: FirstLineIndent=-12pt, 第１のみ-24pt）
 const HEADING_HANGING_CHARS = {
-  1: 0,  // 第１ はぶら下げなし
-  2: 1,  // １　 → 1字
-  3: 3,  // （１） → 3字
-  4: 1,  // ア　 → 1字
-  5: 3,  // （ｱ） → 3字
-  6: 1,  // ａ　 → 1字
-  7: 3,  // （a） → 3字
+  1: 2,  // 第１ → 2字（left2-hang2=0字目から）
+  2: 1,  // １　 → 1字（left2-hang1=1字目から）
+  3: 1,  // (1)  → 1字（left3-hang1=2字目から）
+  4: 1,  // ア　 → 1字（left4-hang1=3字目から）
+  5: 1,  // (ｱ)  → 1字（left5-hang1=4字目から）
+  6: 1,  // ａ　 → 1字（left6-hang1=5字目から）
+  7: 1,  // (a)  → 1字（left7-hang1=6字目から）
 };
 
 // 本文インデント: [left_chars, firstLine_chars]
+// 番号＋全角スペースの直後から本文開始。番号の下には文字が来ない。
 const BODY_INDENT = {
-  0: [0, 1],   // 見出しなし → 首行1字のみ
-  1: [1, 1],   // 第１直下 → 左1字 + 首行1字
-  2: [1, 1],   // １直下 → 左1字 + 首行1字
-  3: [3, 1],   // (1)直下
-  4: [4, 1],   // ア直下
-  5: [5, 1],   // (ｱ)直下
-  6: [6, 1],   // ａ直下
-  7: [7, 1],   // (a)直下
+  0: [0, 1],    // 見出しなし → 首行1字のみ
+  1: [3, 1],    // 第１直下 → 第(0)+１(1)+□(2) → 本文3字目
+  2: [3, 1],    // １直下 → □(1)+１(2)+□(3) → 本文3字目
+  3: [6, 1],    // (1)直下 → （(2)+１(3)+）(4)+□(5) → 本文6字目
+  4: [5, 1],    // ア直下 → □(3)+ア(4)+□(5) → 本文5字目
+  5: [8, 1],    // (ｱ)直下 → （(4)+ｱ(5)+）(6)+□(7) → 本文8字目
+  6: [7, 1],    // ａ直下 → □(5)+ａ(6)+□(7) → 本文7字目
+  7: [10, 1],   // (a)直下 → （(6)+a(7)+）(8)+□(9) → 本文10字目
 };
 
 const TITLE_PATTERN = /(準備書面|訴状|答弁書|意見書|報告書|申立書|陳述書|上申書|申請書|請求書|通知書|催告書|告訴状|告発状|嘆願書|抗告理由書|控訴理由書|上告理由書)/;
@@ -497,21 +502,13 @@ function setParagraphIndent(paragraph, { leftTwips = 0, hangingTwips = 0, firstL
 }
 
 function setHeadingIndent(paragraph, level, text) {
-  // 番号部分を除いた本文の長さで小タイトル vs 本文兼用を判定
-  const body = (text || '').replace(HEADING_STRIP_RE, '').trim();
+  // 岡口マクロVBAソース準拠: 全レベルでぶら下げインデント
   const leftChars = HEADING_LEFT_CHARS[level] || 0;
-
-  if (body.length > 20) {
-    // 本文兼用 → ぶら下げインデント
-    const hangChars = HEADING_HANGING_CHARS[level] || 1;
-    setParagraphIndent(paragraph, {
-      leftTwips: leftChars * _F,
-      hangingTwips: hangChars * _F,
-    });
-  } else {
-    // 短い小タイトル → 左インデントのみ
-    setParagraphIndent(paragraph, { leftTwips: leftChars * _F });
-  }
+  const hangChars = HEADING_HANGING_CHARS[level] || 1;
+  setParagraphIndent(paragraph, {
+    leftTwips: leftChars * _F,
+    hangingTwips: hangChars * _F,
+  });
 }
 
 function setBodyIndent(paragraph, currentHeadingLevel) {
