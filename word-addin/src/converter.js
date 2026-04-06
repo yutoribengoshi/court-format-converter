@@ -24,30 +24,43 @@ const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PKG_NS = 'http://schemas.microsoft.com/office/2006/xmlPackage';
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
 
-// twips直接指定。半角括弧(L3,L5,L7)は幅が狭い。
+// 1全角文字幅 (twips)
 const _F = 242; // full-width char
-const _H = 121; // half-width char
-const _NF = 2 * _F;         // 全角番号幅（「１　」等）
-const _NH = 3 * _H + _F;    // 半角括弧番号幅（「(1)　」等）
-// 番号開始位置: L1=0, L2=2, L3=3, L4=4, L5=5, L6=6, L7=7
-const HEADING_LEVELS = {
-  1: [0*_F + 3*_F, 3*_F],
-  2: [2*_F + _NF, _NF],
-  3: [3*_F + _NH, _NH],
-  4: [4*_F + _NF, _NF],
-  5: [5*_F + _NH, _NH],
-  6: [6*_F + _NF, _NF],
-  7: [7*_F + _NH, _NH],
+
+// 見出しレベルごとの左インデント (chars単位)
+// 「第１」の「１」と単独の「１」が縦に揃う配置
+const HEADING_LEFT_CHARS = {
+  1: 0,  // 第１ — 左端（第=0字目、１=1字目）
+  2: 1,  // １   — 左1字（第１の１と縦揃え）
+  3: 3,  // (1)
+  4: 4,  // ア
+  5: 5,  // (ｱ)
+  6: 6,  // ａ
+  7: 7,  // (a)
 };
 
-// [left_twips, firstLine_twips]
-// left + firstLine = title_start（1行目が見出しタイトルと揃う）
-// left = title_start - 1全角（2行目は1字左）
-const BODY_INDENT = {};
-for (const [lv, [ts]] of Object.entries(HEADING_LEVELS)) {
-  BODY_INDENT[lv] = [ts - _F, _F];
-}
-BODY_INDENT[0] = [0, _F];
+// ぶら下げ幅 (chars単位、本文兼用の長い見出し用)
+const HEADING_HANGING_CHARS = {
+  1: 0,  // 第１ はぶら下げなし
+  2: 1,  // １　 → 1字
+  3: 3,  // （１） → 3字
+  4: 1,  // ア　 → 1字
+  5: 3,  // （ｱ） → 3字
+  6: 1,  // ａ　 → 1字
+  7: 3,  // （a） → 3字
+};
+
+// 本文インデント: [left_chars, firstLine_chars]
+const BODY_INDENT = {
+  0: [0, 1],   // 見出しなし → 首行1字のみ
+  1: [1, 1],   // 第１直下 → 左1字 + 首行1字
+  2: [1, 1],   // １直下 → 左1字 + 首行1字
+  3: [3, 1],   // (1)直下
+  4: [4, 1],   // ア直下
+  5: [5, 1],   // (ｱ)直下
+  6: [6, 1],   // ａ直下
+  7: [7, 1],   // (a)直下
+};
 
 const TITLE_PATTERN = /(準備書面|訴状|答弁書|意見書|報告書|申立書|陳述書|上申書|申請書|請求書|通知書|催告書|告訴状|告発状|嘆願書|抗告理由書|控訴理由書|上告理由書)/;
 const LIST_PATTERN = /^[０-９\d]+．/;
@@ -486,36 +499,26 @@ function setParagraphIndent(paragraph, { leftTwips = 0, hangingTwips = 0, firstL
 function setHeadingIndent(paragraph, level, text) {
   // 番号部分を除いた本文の長さで小タイトル vs 本文兼用を判定
   const body = (text || '').replace(HEADING_STRIP_RE, '').trim();
+  const leftChars = HEADING_LEFT_CHARS[level] || 0;
 
   if (body.length > 20) {
     // 本文兼用 → ぶら下げインデント
-    // 1行目は番号から始まる（左に出る）、2行目以降は左インデント位置に揃う
-    const [titleStart, numberHang] = HEADING_LEVELS[level];
-    if (level === 1) {
-      setParagraphIndent(paragraph, { leftTwips: titleStart, hangingTwips: numberHang });
-    } else {
-      const leftChars = { 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7 }[level] || 2;
-      const hangChars = [3, 5, 7].includes(level) ? 3 : 1; // 括弧付き=3字、単独=1字
-      setParagraphIndent(paragraph, {
-        leftTwips: leftChars * _F,
-        hangingTwips: hangChars * _F,
-      });
-    }
+    const hangChars = HEADING_HANGING_CHARS[level] || 1;
+    setParagraphIndent(paragraph, {
+      leftTwips: leftChars * _F,
+      hangingTwips: hangChars * _F,
+    });
   } else {
-    // 短い小タイトル → 左インデント0、首行1字下げ
-    if (level === 1) {
-      setParagraphIndent(paragraph, { leftTwips: 0 });
-    } else {
-      setParagraphIndent(paragraph, { leftTwips: 0, firstLineTwips: _F });
-    }
+    // 短い小タイトル → 左インデントのみ
+    setParagraphIndent(paragraph, { leftTwips: leftChars * _F });
   }
 }
 
 function setBodyIndent(paragraph, currentHeadingLevel) {
-  const [left, firstLine] = BODY_INDENT[currentHeadingLevel] || [0, _F];
+  const [leftChars, firstLineChars] = BODY_INDENT[currentHeadingLevel] || [0, 1];
   setParagraphIndent(paragraph, {
-    leftTwips: left,
-    firstLineTwips: firstLine,
+    leftTwips: leftChars * _F,
+    firstLineTwips: firstLineChars * _F,
   });
 }
 
