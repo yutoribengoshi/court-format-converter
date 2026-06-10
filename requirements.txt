@@ -1,1 +1,4 @@
 python-docx>=0.8.11
+
+# テスト用（pip install -r requirements.txt で開発環境を再現）
+pytest>=7.0
