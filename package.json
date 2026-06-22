@@ -1,0 +1,19 @@
+{
+  "name": "court-format-converter-addin",
+  "version": "0.1.0",
+  "description": "Word アドイン版 court-format-converter の OOXML 変換ロジックのテスト構成",
+  "private": true,
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "^0.8.10",
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/word-addin/test/**/*.test.js"
+    ]
+  }
+}

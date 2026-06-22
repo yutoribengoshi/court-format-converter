@@ -10,3 +10,6 @@ build/
 .DS_Store
 .venv/
 ~$*
+
+# Node (word-addin tests)
+node_modules/

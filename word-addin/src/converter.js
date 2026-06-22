@@ -21,9 +21,38 @@ const BODY_FONT_SIZE = 12;
 const TABLE_FONT_SIZE = 10;
 const TITLE_FONT_SIZE = 16;
 
+// ------------------------------------------------------------
+// インデント方式の切替フラグ（CLI版 court_format_converter.py と統一）
+//   true  : 段落スタイル方式（裁判L1〜L5 / 裁判本文L1〜L5 を割当）。デフォルト。
+//           インデントを styles.xml 側に持たせ、Word でスタイル定義を1箇所
+//           変えれば階層全体のインデントを一括調整できる。
+//   false : 従来の直接インデント方式（各段落に w:ind を直接設定）。
+// ------------------------------------------------------------
+const USE_STYLE_MODE = true;
+
+// 平野晋（筑波大法科大学院）テンプレートの標準インデント値（単位: cm）。
+// CLI版 _HIRANO_STYLE_CM と同一。1cm = 567 twips。
+// 見出しは hanging（ぶら下げ）、本文は firstLine（字下げ）。
+//   level -> { headingLeft, headingHanging, bodyLeft, bodyFirstLine }
+const HIRANO_STYLE_CM = {
+  1: { headingLeft: 0.801, headingHanging: 0.801, bodyLeft: 0.499, bodyFirstLine: 0.499 },
+  2: { headingLeft: 0.741, headingHanging: 0.37, bodyLeft: 0.741, bodyFirstLine: 0.37 },
+  3: { headingLeft: 1.109, headingHanging: 0.741, bodyLeft: 1.109, bodyFirstLine: 0.37 },
+  4: { headingLeft: 1.482, headingHanging: 0.37, bodyLeft: 1.482, bodyFirstLine: 0.37 },
+  5: { headingLeft: 2.223, headingHanging: 1.111, bodyLeft: 2.223, bodyFirstLine: 0.37 },
+};
+
+// cm -> twips 変換係数（CHAR_TWIPS=245 とは別系統。スタイルの w:ind は twips 直値で書く）
+const CM_TO_TWIPS = 567;
+
+// スタイル方式が扱う見出しレベルの上限（L1〜L5）。
+// L6・L7 は最深の L5 スタイルにフォールバックする。
+const STYLE_MAX_LEVEL = 5;
+
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const PKG_NS = 'http://schemas.microsoft.com/office/2006/xmlPackage';
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
+const PKG_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 
 // 見出しレベルごとの設定: [left_chars, 番号説明]
 // 全角文字単位の整数。半角は使わない。
@@ -452,6 +481,218 @@ function clearParagraphIndent(paragraph) {
   removeDirectWordChildren(paragraphProps, 'ind');
 }
 
+// ------------------------------------------------------------
+// 段落スタイル方式（裁判L1〜L5 / 裁判本文L1〜L5）
+// ------------------------------------------------------------
+
+// styleId は ASCII（saibanL1 / saibanBodyL1）。w:name に日本語（裁判L1 / 裁判本文L1）。
+function headingStyleId(level) {
+  const lv = Math.min(Math.max(level, 1), STYLE_MAX_LEVEL);
+  return `saibanL${lv}`;
+}
+
+function headingStyleName(level) {
+  const lv = Math.min(Math.max(level, 1), STYLE_MAX_LEVEL);
+  return `裁判L${lv}`;
+}
+
+function bodyStyleId(level) {
+  const lv = level < 1 ? 1 : Math.min(level, STYLE_MAX_LEVEL);
+  return `saibanBodyL${lv}`;
+}
+
+function bodyStyleName(level) {
+  const lv = level < 1 ? 1 : Math.min(level, STYLE_MAX_LEVEL);
+  return `裁判本文L${lv}`;
+}
+
+function cmToTwips(cm) {
+  return Math.round(cm * CM_TO_TWIPS);
+}
+
+// styles.xml の <w:styles> 要素を取得する。part が無ければ生成して取得する。
+// 戻り値: 取得/生成した <w:styles> 要素。
+function getOrCreateStylesRoot(packageDoc) {
+  const pkgRoot = packageDoc.documentElement; // <pkg:package>
+
+  // 既存の /word/styles.xml part を探す
+  let stylesPart = Array.from(packageDoc.getElementsByTagNameNS(PKG_NS, 'part'))
+    .find((candidate) => getPackageAttr(candidate, 'name') === '/word/styles.xml');
+
+  if (stylesPart) {
+    const xmlData = Array.from(stylesPart.childNodes)
+      .find((node) => node.nodeType === 1 && node.namespaceURI === PKG_NS && node.localName === 'xmlData');
+    if (xmlData) {
+      const stylesEl = Array.from(xmlData.childNodes)
+        .find((node) => isWordElement(node, 'styles'));
+      if (stylesEl) {
+        return stylesEl;
+      }
+      // xmlData はあるが w:styles が無い異常系 → 作る
+      const created = createWordElement(packageDoc, 'styles');
+      xmlData.appendChild(created);
+      return created;
+    }
+  }
+
+  // part 自体が無い → part + xmlData + w:styles を生成して package に追加
+  stylesPart = packageDoc.createElementNS(PKG_NS, 'pkg:part');
+  stylesPart.setAttributeNS(PKG_NS, 'pkg:name', '/word/styles.xml');
+  stylesPart.setAttributeNS(
+    PKG_NS,
+    'pkg:contentType',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml',
+  );
+
+  const xmlData = packageDoc.createElementNS(PKG_NS, 'pkg:xmlData');
+  const stylesEl = createWordElement(packageDoc, 'styles');
+  xmlData.appendChild(stylesEl);
+  stylesPart.appendChild(xmlData);
+  pkgRoot.appendChild(stylesPart);
+
+  ensureStylesRelationship(packageDoc);
+
+  return stylesEl;
+}
+
+// /word/_rels/document.xml.rels に styles.xml への関係を追加（無ければ）。
+// getOoxml() の返すパッケージには通常 styles part が無いため、生成時に rel も張る。
+function ensureStylesRelationship(packageDoc) {
+  const relsPart = Array.from(packageDoc.getElementsByTagNameNS(PKG_NS, 'part'))
+    .find((candidate) => getPackageAttr(candidate, 'name') === '/word/_rels/document.xml.rels');
+  if (!relsPart) {
+    return; // rels part 自体が無ければ何もしない（Word 側が補完する）
+  }
+
+  const xmlData = Array.from(relsPart.childNodes)
+    .find((node) => node.nodeType === 1 && node.namespaceURI === PKG_NS && node.localName === 'xmlData');
+  if (!xmlData) {
+    return;
+  }
+
+  const relationships = Array.from(xmlData.childNodes)
+    .find((node) => node.nodeType === 1 && node.localName === 'Relationships');
+  if (!relationships) {
+    return;
+  }
+
+  const STYLE_REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles';
+  const hasStylesRel = Array.from(relationships.childNodes)
+    .some((node) => node.nodeType === 1
+      && node.localName === 'Relationship'
+      && (node.getAttribute('Type') === STYLE_REL_TYPE
+        || node.getAttribute('Target') === 'styles.xml'));
+  if (hasStylesRel) {
+    return;
+  }
+
+  // 既存の rId と衝突しない ID を採番
+  const usedIds = new Set(
+    Array.from(relationships.childNodes)
+      .filter((node) => node.nodeType === 1 && node.localName === 'Relationship')
+      .map((node) => node.getAttribute('Id')),
+  );
+  let n = 1;
+  while (usedIds.has(`rId${n}`)) {
+    n += 1;
+  }
+
+  const rel = packageDoc.createElementNS(PKG_REL_NS, 'Relationship');
+  rel.setAttribute('Id', `rId${n}`);
+  rel.setAttribute('Type', STYLE_REL_TYPE);
+  rel.setAttribute('Target', 'styles.xml');
+  relationships.appendChild(rel);
+}
+
+// 1スタイル要素 <w:style w:type="paragraph"> を構築して返す。
+function buildCourtStyle(packageDoc, { styleId, name, leftTwips, hangingTwips = 0, firstLineTwips = 0, outlineLevel = null }) {
+  const style = createWordElement(packageDoc, 'style');
+  setWordAttr(style, 'type', 'paragraph');
+  setWordAttr(style, 'styleId', styleId);
+
+  const nameEl = createWordElement(packageDoc, 'name');
+  setWordAttr(nameEl, 'val', name);
+  style.appendChild(nameEl);
+
+  // Normal 継承（フォント・サイズは標準を崩さない）
+  const basedOn = createWordElement(packageDoc, 'basedOn');
+  setWordAttr(basedOn, 'val', 'Normal');
+  style.appendChild(basedOn);
+
+  const pPr = createWordElement(packageDoc, 'pPr');
+
+  const ind = createWordElement(packageDoc, 'ind');
+  setWordAttr(ind, 'left', Math.round(leftTwips));
+  if (hangingTwips > 0) {
+    setWordAttr(ind, 'hanging', Math.round(hangingTwips));
+  } else if (firstLineTwips > 0) {
+    setWordAttr(ind, 'firstLine', Math.round(firstLineTwips));
+  }
+  pPr.appendChild(ind);
+
+  if (outlineLevel !== null) {
+    const olvl = createWordElement(packageDoc, 'outlineLvl');
+    setWordAttr(olvl, 'val', outlineLevel);
+    pPr.appendChild(olvl);
+  }
+
+  style.appendChild(pPr);
+  return style;
+}
+
+// パッケージに裁判書式用の段落スタイル（裁判L1〜L5 / 裁判本文L1〜L5）を冪等に定義する。
+// 既に同 styleId が存在すれば再定義しない。インデントはスタイルの pPr に持たせるため、
+// Word 上でスタイル定義を1箇所変えればその階層の全段落が一括で動く。
+// フォント等は Normal を継承し、明朝・本文サイズを崩さない。平野晋テンプレート標準値。
+function ensureCourtStyles(packageDoc) {
+  const stylesRoot = getOrCreateStylesRoot(packageDoc);
+
+  const existingIds = new Set(
+    getDirectWordChildren(stylesRoot, 'style').map((s) => getWordAttr(s, 'styleId')),
+  );
+
+  for (let level = 1; level <= STYLE_MAX_LEVEL; level += 1) {
+    const vals = HIRANO_STYLE_CM[level];
+
+    // 見出しスタイル: 裁判L{level}（hanging + outlineLvl）
+    const hId = headingStyleId(level);
+    if (!existingIds.has(hId)) {
+      stylesRoot.appendChild(buildCourtStyle(packageDoc, {
+        styleId: hId,
+        name: headingStyleName(level),
+        leftTwips: cmToTwips(vals.headingLeft),
+        hangingTwips: cmToTwips(vals.headingHanging),
+        outlineLevel: level - 1,
+      }));
+      existingIds.add(hId);
+    }
+
+    // 本文スタイル: 裁判本文L{level}（firstLine）
+    const bId = bodyStyleId(level);
+    if (!existingIds.has(bId)) {
+      stylesRoot.appendChild(buildCourtStyle(packageDoc, {
+        styleId: bId,
+        name: bodyStyleName(level),
+        leftTwips: cmToTwips(vals.bodyLeft),
+        firstLineTwips: cmToTwips(vals.bodyFirstLine),
+      }));
+      existingIds.add(bId);
+    }
+  }
+
+  return stylesRoot;
+}
+
+// 段落の pPr に w:pStyle（styleId）を設定する。既存 pStyle は置換する。
+function setParagraphStyle(paragraph, styleId) {
+  const paragraphProps = ensureParagraphProperties(paragraph);
+  removeDirectWordChildren(paragraphProps, 'pStyle');
+  const pStyle = createWordElement(paragraph.ownerDocument, 'pStyle');
+  setWordAttr(pStyle, 'val', styleId);
+  // pStyle は pPr 先頭に置くのが OOXML 慣例
+  paragraphProps.insertBefore(pStyle, paragraphProps.firstChild);
+}
+
 function setIndent(paragraph, { leftChars = 0, hangingChars = 0, firstLineChars = 0 } = {}) {
   clearParagraphIndent(paragraph);
 
@@ -485,6 +726,20 @@ function setOutlineLevel(paragraph, level) {
 }
 
 function setHeadingIndent(paragraph, level) {
+  // USE_STYLE_MODE=true（既定）: 段落スタイル 裁判L{level} を割当 + 直接 w:ind を除去。
+  //   outlineLvl はスタイル側にも持たせているが、スタイルを剥がしても Word 目次が
+  //   崩れないよう段落にも残す（CLI版と同じ堅牢性方針）。
+  if (USE_STYLE_MODE) {
+    setOutlineLevel(paragraph, level);
+    setParagraphStyle(paragraph, headingStyleId(level));
+    clearParagraphIndent(paragraph);
+    return;
+  }
+  setHeadingIndentLegacy(paragraph, level);
+}
+
+// 【従来方式】見出し段落のインデント＋アウトラインレベルを直接 w:ind で設定。
+function setHeadingIndentLegacy(paragraph, level) {
   const leftChars = HEADING_LEVELS[level][0];
   setOutlineLevel(paragraph, level);
 
@@ -513,11 +768,29 @@ function setHeadingIndent(paragraph, level) {
 }
 
 function setBodyIndent(paragraph, currentHeadingLevel) {
+  // USE_STYLE_MODE=true（既定）: 段落スタイル 裁判本文L{level} を割当 + 直接 w:ind を除去。
+  // level=0 や範囲外は 裁判本文L1 にフォールバック（bodyStyleId 内で処理）。
+  if (USE_STYLE_MODE) {
+    setParagraphStyle(paragraph, bodyStyleId(currentHeadingLevel));
+    clearParagraphIndent(paragraph);
+    return;
+  }
+  setBodyIndentLegacy(paragraph, currentHeadingLevel);
+}
+
+// 【従来方式】本文段落のインデントを直接 w:ind で設定。
+function setBodyIndentLegacy(paragraph, currentHeadingLevel) {
   const [left, fl] = BODY_INDENT[currentHeadingLevel] || [0, 1];
   setIndent(paragraph, { leftChars: left, firstLineChars: fl });
 }
 
 function setListIndent(paragraph, currentHeadingLevel, markerLength) {
+  // 箇条書き・番号リストはマーカー幅ぶら下げが段落ごとに変わるため、スタイルだけでは
+  // 表現できない。スタイル方式でも本文スタイルを土台に割り当てつつ、ぶら下げ位置は
+  // 直接 w:ind で補正する（マーカー幅 = markerLength 字）。
+  if (USE_STYLE_MODE) {
+    setParagraphStyle(paragraph, bodyStyleId(currentHeadingLevel));
+  }
   const [bodyLeft] = BODY_INDENT[currentHeadingLevel] || [0, 0];
   setIndent(paragraph, {
     leftChars: bodyLeft + markerLength,
@@ -660,6 +933,14 @@ function transformBodyOoxml(ooxml, options) {
   });
 
   const levelOffset = doIndent ? detectLevelOffset(candidateTexts) : 0;
+
+  // 段落スタイル方式: 裁判L1〜L5 / 裁判本文L1〜L5 を styles.xml に冪等定義する。
+  // 各段落の setHeadingIndent/setBodyIndent が w:pStyle を割り当てる。
+  // パッケージ全体を1回処理（styles part を生成 or 既存に追記）。
+  if (doIndent && USE_STYLE_MODE) {
+    ensureCourtStyles(xmlDoc);
+  }
+
   let currentHeadingLevel = 0;
   let inHeaderSection = true;
   const counter = new Counter();
@@ -845,4 +1126,37 @@ async function convertDocument(options) {
       await applyFooterPageNumbers(context);
     }
   });
+}
+
+// ============================================================
+// CommonJS エクスポート（ユニットテスト用）
+// ブラウザ/Office.js 実行時は module が未定義のためこのブロックは無視される。
+// 純粋な OOXML 変換ロジック（Word 非依存）だけをテストから参照できるようにする。
+// ============================================================
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    // フラグ・定数
+    USE_STYLE_MODE,
+    HIRANO_STYLE_CM,
+    CM_TO_TWIPS,
+    STYLE_MAX_LEVEL,
+    CHAR_TWIPS,
+    // 変換エントリポイント
+    transformBodyOoxml,
+    // スタイル方式ヘルパー
+    ensureCourtStyles,
+    getOrCreateStylesRoot,
+    setParagraphStyle,
+    headingStyleId,
+    headingStyleName,
+    bodyStyleId,
+    bodyStyleName,
+    cmToTwips,
+    // 既存の純ロジック（テスト補助）
+    toZenkaku,
+    detectHeadingLevel,
+    setIndent,
+    setHeadingIndent,
+    setBodyIndent,
+  };
 }
