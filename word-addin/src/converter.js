@@ -30,9 +30,35 @@ const TITLE_FONT_SIZE = 16;
 // ------------------------------------------------------------
 const USE_STYLE_MODE = true;
 
+// ------------------------------------------------------------
+// スタイル方式のインデント値の切替フラグ（CLI版 USE_HIRANO_STYLE と統一）
+//   false : 階段状（岡口マクロ式＝東京地裁などの実務標準）。デフォルト。
+//           第１＞１＞(1)＞ア が1字ずつ右下がりになる。整数字基準
+//           （CHAR_TWIPS=245 の整数倍）で文字グリッドにぴったり揃う。
+//   true  : 平野晋（筑波ロー）テンプレート（cm基準・番号幅ぶら下げ）。
+//           第N・N・(1) の番号がほぼ「縦に並ぶ」独特な見た目になる。
+//           実務標準ではないが温存。
+// ------------------------------------------------------------
+const USE_HIRANO_STYLE = false;
+
+// 階段状（岡口マクロ式＝実務標準）の段落スタイル用インデント値（単位: twips）。
+// CLI版 _STAIRCASE_STYLE_TWIPS と同一。全角1字 = CHAR_TWIPS(245) twips。値は 245 の整数倍。
+// 見出し: 番号開始位置に left、ぶら下げ無し（hanging=0）。折り返しは番号の下に収まる。
+// 本文  : left＝見出し本文位置、firstLine=1字（245）。
+//   level -> { headingLeft, headingHanging, bodyLeft, bodyFirstLine } すべて twips。
+// 字基準: 見出し left=0,1,2,3,4 / hanging=0、本文 left=2,2,3,4,5 / firstLine=1字。
+const STAIRCASE_STYLE_TWIPS = {
+  1: { headingLeft: 0,   headingHanging: 0, bodyLeft: 490,  bodyFirstLine: 245 },
+  2: { headingLeft: 245, headingHanging: 0, bodyLeft: 490,  bodyFirstLine: 245 },
+  3: { headingLeft: 490, headingHanging: 0, bodyLeft: 735,  bodyFirstLine: 245 },
+  4: { headingLeft: 735, headingHanging: 0, bodyLeft: 980,  bodyFirstLine: 245 },
+  5: { headingLeft: 980, headingHanging: 0, bodyLeft: 1225, bodyFirstLine: 245 },
+};
+
 // 平野晋（筑波大法科大学院）テンプレートの標準インデント値（単位: cm）。
-// CLI版 _HIRANO_STYLE_CM と同一。1cm = 567 twips。
-// 見出しは hanging（ぶら下げ）、本文は firstLine（字下げ）。
+// ※ 番号がほぼ「縦に並ぶ」筑波準拠版。実務標準ではないため既定から外したが、
+//    USE_HIRANO_STYLE=true で選択できるよう温存している。CLI版 _HIRANO_STYLE_CM と同一。
+// 1cm = 567 twips。見出しは hanging（ぶら下げ）、本文は firstLine（字下げ）。
 //   level -> { headingLeft, headingHanging, bodyLeft, bodyFirstLine }
 const HIRANO_STYLE_CM = {
   1: { headingLeft: 0.801, headingHanging: 0.801, bodyLeft: 0.499, bodyFirstLine: 0.499 },
@@ -643,7 +669,9 @@ function buildCourtStyle(packageDoc, { styleId, name, leftTwips, hangingTwips = 
 // パッケージに裁判書式用の段落スタイル（裁判L1〜L5 / 裁判本文L1〜L5）を冪等に定義する。
 // 既に同 styleId が存在すれば再定義しない。インデントはスタイルの pPr に持たせるため、
 // Word 上でスタイル定義を1箇所変えればその階層の全段落が一括で動く。
-// フォント等は Normal を継承し、明朝・本文サイズを崩さない。平野晋テンプレート標準値。
+// フォント等は Normal を継承し、明朝・本文サイズを崩さない。
+// 既定は階段状（岡口マクロ式＝実務標準、整数字基準=twips 直値）。
+// USE_HIRANO_STYLE=true のときのみ平野/筑波準拠版（cm→twips 変換）を使う。
 function ensureCourtStyles(packageDoc) {
   const stylesRoot = getOrCreateStylesRoot(packageDoc);
 
@@ -651,17 +679,21 @@ function ensureCourtStyles(packageDoc) {
     getDirectWordChildren(stylesRoot, 'style').map((s) => getWordAttr(s, 'styleId')),
   );
 
-  for (let level = 1; level <= STYLE_MAX_LEVEL; level += 1) {
-    const vals = HIRANO_STYLE_CM[level];
+  // 既定は階段状（twips 直値）。USE_HIRANO_STYLE=true のときのみ平野値（cm→twips）。
+  const styleVals = USE_HIRANO_STYLE ? HIRANO_STYLE_CM : STAIRCASE_STYLE_TWIPS;
+  const toTwips = USE_HIRANO_STYLE ? cmToTwips : (v) => Math.round(v);
 
-    // 見出しスタイル: 裁判L{level}（hanging + outlineLvl）
+  for (let level = 1; level <= STYLE_MAX_LEVEL; level += 1) {
+    const vals = styleVals[level];
+
+    // 見出しスタイル: 裁判L{level}（hanging + outlineLvl）。階段状では hanging=0。
     const hId = headingStyleId(level);
     if (!existingIds.has(hId)) {
       stylesRoot.appendChild(buildCourtStyle(packageDoc, {
         styleId: hId,
         name: headingStyleName(level),
-        leftTwips: cmToTwips(vals.headingLeft),
-        hangingTwips: cmToTwips(vals.headingHanging),
+        leftTwips: toTwips(vals.headingLeft),
+        hangingTwips: toTwips(vals.headingHanging),
         outlineLevel: level - 1,
       }));
       existingIds.add(hId);
@@ -673,8 +705,8 @@ function ensureCourtStyles(packageDoc) {
       stylesRoot.appendChild(buildCourtStyle(packageDoc, {
         styleId: bId,
         name: bodyStyleName(level),
-        leftTwips: cmToTwips(vals.bodyLeft),
-        firstLineTwips: cmToTwips(vals.bodyFirstLine),
+        leftTwips: toTwips(vals.bodyLeft),
+        firstLineTwips: toTwips(vals.bodyFirstLine),
       }));
       existingIds.add(bId);
     }
@@ -1150,6 +1182,8 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     // フラグ・定数
     USE_STYLE_MODE,
+    USE_HIRANO_STYLE,
+    STAIRCASE_STYLE_TWIPS,
     HIRANO_STYLE_CM,
     CM_TO_TWIPS,
     STYLE_MAX_LEVEL,
